@@ -592,6 +592,78 @@ void main() {
       expect(find.textContaining('cargo test'), findsWidgets);
     });
   });
+
+  group('git for a person', () {
+    testWidgets('chosen files are committed with a message, and the own branch is asked about', (
+      t,
+    ) async {
+      final s = Asked()
+        ..now = const Changes(
+          repository: true,
+          branch: 'main',
+          defaultBranch: 'main',
+          hooks: true,
+          upstream: 'origin/main',
+          ahead: 1,
+          behind: 0,
+          remote: 'origin',
+          remoteUrl: 'git@example.com:a/b.git',
+          files: [
+            Changed('a.rs', 'changed', digest: 'da'),
+            Changed('b.rs', 'new', digest: 'db'),
+            Changed('gone.rs', 'removed'),
+          ],
+          diff: '--- a.rs\n+++ a.rs\n@@ -1 +1 @@\n-x\n+y\n',
+        )
+        ..log = const [CommitInfo('c0ffee12345', 'Ada', 1, 'First of all')];
+      await shell(t, s);
+      expect(find.text('1 to push (origin/main, as of the last fetch)'), findsOneWidget);
+      expect(find.textContaining('hooks. Axiom does not run them'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Commit b.rs'));
+      await t.enterText(field('Commit message'), 'Make it so');
+      await settled(t);
+      await press(t, find.text('Commit 2 files'));
+      expect(find.text('main is the repository\'s own branch. Commit to it?'), findsOneWidget);
+      expect(s.calls.where((c) => c.first == 'commit'), isEmpty, reason: 'asked first');
+      await snap(t, 'git-commit');
+      await press(t, find.text('Commit to main'));
+      expect(s.calls.where((c) => c.first == 'commit').single, [
+        'commit',
+        ('a.rs', 'da'),
+        ('gone.rs', null),
+        'Make it so',
+        'onto default',
+      ]);
+      expect(
+        find.textContaining('Committed abcdef12. The repository\'s hooks did not run.'),
+        findsOneWidget,
+      );
+      // On a new branch, nothing more is asked.
+      await t.enterText(field('Commit message'), 'Again');
+      await t.enterText(field('New branch'), 'topic');
+      await settled(t);
+      await press(t, find.text('Commit 3 files'));
+      expect(s.calls.where((c) => c.first == 'commit').last, [
+        'commit',
+        ('a.rs', 'da'),
+        ('b.rs', 'db'),
+        ('gone.rs', null),
+        'Again',
+        'topic',
+      ]);
+      await press(t, find.text('Push'));
+      expect(s.calls.where((c) => c.first == 'push'), hasLength(1));
+      expect(find.text('main is on origin as main'), findsOneWidget);
+      // Compared with a branch, and its history.
+      await press(t, find.bySemanticsLabel('Compare: since the last commit'));
+      await press(t, find.text('Since where topic parted'));
+      expect(s.calls.where((c) => c.first == 'changes').last, ['changes', 's', 'topic', 'base']);
+      await press(t, find.bySemanticsLabel('History'));
+      expect(find.text('First of all'), findsOneWidget);
+      await press(t, find.text('First of all'));
+      expect(find.text('Body of it'), findsOneWidget);
+    });
+  });
 }
 
 /// A picture of that size, as its first bytes say: enough to be measured.

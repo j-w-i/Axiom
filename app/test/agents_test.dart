@@ -194,6 +194,49 @@ class Asked extends HostStore {
     if (closing case final e? when !force) throw e;
   }
 
+  List<CommitInfo> log = const [];
+  @override
+  Future<List<CommitInfo>> gitLog(
+    String session, {
+    String? repository,
+    String? from,
+    int most = 30,
+  }) => _do(['log', ?repository], log);
+  @override
+  Future<CommitShown> gitShow(String session, String commit, {String? repository}) => _do(
+    ['show', commit],
+    CommitShown(
+      log.firstWhere((c) => c.id == commit),
+      'Body of it',
+      '--- a\n+++ a\n@@ -1 +1 @@\n-x\n+y\n',
+    ),
+  );
+  @override
+  Future<List<String>> gitBranches(String session, {String? repository}) =>
+      _do(['branches'], const ['main', 'topic']);
+  @override
+  Future<Committed> commit(
+    String session,
+    List<(String, String?)> files,
+    String message, {
+    String? repository,
+    String? branch,
+    bool ontoDefault = false,
+    (String, String)? author,
+  }) => _do([
+    'commit',
+    for (final f in files) f,
+    message,
+    ?branch,
+    if (ontoDefault) 'onto default',
+    ?author,
+  ], const Committed(CommitInfo('abcdef1234', 'Ada', 1, 'S'), hooks: true));
+  @override
+  Future<String> push(String session, {String? repository}) =>
+      _do(['push'], 'main is on origin as main');
+  @override
+  Future<String> pull(String session, {String? repository}) => _do(['pull'], 'pulled');
+
   // Asked again and again while shown: not among the calls.
   @override
   Future<List<JobInfo>> jobs() async => running;
@@ -227,7 +270,12 @@ class Asked extends HostStore {
   void seen(String session, String agent) => calls.add(['seen', session, agent]);
   Changes now = const Changes();
   @override
-  Future<Changes> changes(String session) => _do(['changes', session], now);
+  Future<Changes> changes(
+    String session, {
+    String? repository,
+    String? against,
+    bool base = false,
+  }) => _do(['changes', session, ?repository, ?against, if (base) 'base'], now);
   @override
   Future<void> open(String id) => _do(['open', id], null);
   @override

@@ -379,8 +379,91 @@ class HostStore extends ChangeNotifier {
   }
 
   /// What has been changed in a session's folder.
-  Future<Changes> changes(String session) async =>
-      Changes.decode((await _live.call('workspace.changes', {'session': session}))! as Json);
+  Future<Changes> changes(
+    String session, {
+    String? repository,
+    String? against,
+    bool base = false,
+  }) async => Changes.decode(
+    (await _live.call('workspace.changes', {
+          'session': session,
+          'repository': ?repository,
+          'against': ?against,
+          if (base) 'base': true,
+        }, _long))!
+        as Json,
+  );
+
+  Future<List<CommitInfo>> gitLog(
+    String session, {
+    String? repository,
+    String? from,
+    int most = 30,
+  }) async => [
+    for (final j
+        in (await _live.call('git.log', {
+              'session': session,
+              'repository': ?repository,
+              'from': ?from,
+              'most': most,
+            }, _long))!
+            as List<Object?>)
+      CommitInfo.decode(j! as Json),
+  ];
+
+  Future<CommitShown> gitShow(String session, String commit, {String? repository}) async =>
+      CommitShown.decode(
+        (await _live.call('git.show', {
+              'session': session,
+              'repository': ?repository,
+              'commit': commit,
+            }, _long))!
+            as Json,
+      );
+
+  Future<List<String>> gitBranches(String session, {String? repository}) async => [
+    for (final b
+        in (await _live.call('git.branches', {
+              'session': session,
+              'repository': ?repository,
+            }, _long))!
+            as List<Object?>)
+      b! as String,
+  ];
+
+  /// Commits the files as they were shown: each with the digest of what was seen, none if removed.
+  Future<Committed> commit(
+    String session,
+    List<(String, String?)> files,
+    String message, {
+    String? repository,
+    String? branch,
+    bool ontoDefault = false,
+    (String, String)? author,
+  }) async => Committed.decode(
+    (await _live.call('git.commit', {
+          'session': session,
+          'repository': ?repository,
+          'files': [
+            for (final (path, digest) in files) {'path': path, 'digest': ?digest},
+          ],
+          'message': message,
+          'branch': ?branch,
+          if (ontoDefault) 'onto_default': true,
+          if (author case (final n, final e)) 'author': {'name': n, 'email': e},
+        }, _long))!
+        as Json,
+  );
+
+  Future<String> push(String session, {String? repository}) async =>
+      ((await _live.call('git.push', {'session': session, 'repository': ?repository}, _long))!
+              as Json)['said']!
+          as String;
+
+  Future<String> pull(String session, {String? repository}) async =>
+      ((await _live.call('git.pull', {'session': session, 'repository': ?repository}, _long))!
+              as Json)['said']!
+          as String;
 
   /// Much is read for it, and perhaps written.
   static const _long = Duration(minutes: 5);

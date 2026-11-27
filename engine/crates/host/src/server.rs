@@ -1089,6 +1089,12 @@ fn slow(c: &Call) -> bool {
             | Call::ProgramRemove { .. }
             | Call::PlanAccept { .. }
             | Call::Changes { .. }
+            | Call::GitLog { .. }
+            | Call::GitShow { .. }
+            | Call::GitBranches { .. }
+            | Call::GitCommit { .. }
+            | Call::GitPush { .. }
+            | Call::GitPull { .. }
             | Call::CopyChanges { .. }
             | Call::CopyBring { .. }
             | Call::CopyBack { .. }
@@ -1163,6 +1169,18 @@ fn processes(pids: &[u32]) -> Vec<ProcessInfo> {
         let _ = pids;
         Vec::new()
     }
+}
+
+/// What git that talks to a remote for a person is started with: their home, so that their own
+/// configuration and keys are found, their agent's socket if they have one, and no question asked.
+async fn remote_env(st: &Arc<State>) -> Result<axiom_spawn::Env, WireError> {
+    let written = st.agents.written(&st.store).await?;
+    let mut env = st.agents.editors(written)?.env()?;
+    env.set("GIT_TERMINAL_PROMPT", "0").map_err(|e| agents::bad(e.to_string()))?;
+    if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+        env.set("SSH_AUTH_SOCK", &sock).map_err(|e| agents::bad(e.to_string()))?;
+    }
+    Ok(env)
 }
 
 /// Done off the runtime's threads.
@@ -1833,9 +1851,10 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             }
             Ok(json!({ "agent": agent }))
         }
-        Call::Changes { session } => {
+        Call::Changes { session, repository, against, base } => {
             let folder = workspace(st, &session).await?;
-            let c = changes::changes(&st.agents, &session, folder).await?;
+            let against = against.map(|a| (a, base));
+            let c = changes::changes(&st.agents, &session, folder, repository, against).await?;
             serde_json::to_value(c).map_err(|e| internal(e.to_string()))
         }
         Call::Seen { session, agent } => {
@@ -2163,6 +2182,64 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let written = st.agents.written(&st.store).await?;
             let w = st.agents.editors(written)?;
             value(off(move || Ok(w.editors())).await?)
+        }
+        Call::GitLog { session, repository, from, most } => {
+            let folder = workspace(st, &session).await?;
+            value(changes::log(&st.agents, &session, folder, repository, from, most).await?)
+        }
+        Call::GitShow { session, repository, commit } => {
+            let folder = workspace(st, &session).await?;
+            value(changes::show(&st.agents, &session, folder, repository, &commit).await?)
+        }
+        Call::GitCommit { session, repository, files, message, branch, onto_default, author } => {
+            let folder = workspace(st, &session).await?;
+            let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+            let subject = format!(
+                "commit in {}{}: {}",
+                repository.as_deref().map_or_else(|| folder.clone(), |r| format!("{folder}/{r}")),
+                branch.as_deref().map_or_else(String::new, |b| format!(" on a new branch {b}")),
+                names.join(", ")
+            );
+            person(st, &session, &folder, "git", subject).await?;
+            let home = st.cfg.home.clone();
+            let done = changes::commit(
+                &st.agents,
+                &session,
+                folder,
+                repository,
+                files,
+                message,
+                branch,
+                onto_default,
+                author,
+                home,
+            )
+            .await?;
+            value(done)
+        }
+        Call::GitPush { session, repository } => {
+            let folder = workspace(st, &session).await?;
+            let what =
+                changes::remote_words(&st.agents, &session, folder.clone(), repository.clone())
+                    .await?;
+            person(st, &session, &folder, "git", format!("push {what}")).await?;
+            let env = remote_env(st).await?;
+            let said = changes::push(&st.agents, &session, folder, repository, env).await?;
+            Ok(json!({ "said": said }))
+        }
+        Call::GitPull { session, repository } => {
+            let folder = workspace(st, &session).await?;
+            let what =
+                changes::remote_words(&st.agents, &session, folder.clone(), repository.clone())
+                    .await?;
+            person(st, &session, &folder, "git", format!("pull {what}")).await?;
+            let env = remote_env(st).await?;
+            let said = changes::pull(&st.agents, &session, folder, repository, env).await?;
+            Ok(json!({ "said": said }))
+        }
+        Call::GitBranches { session, repository } => {
+            let folder = workspace(st, &session).await?;
+            value(changes::branches(&st.agents, &session, folder, repository).await?)
         }
         Call::Folders {} => value(st.folders.list()),
         Call::FolderSet { path, name, pinned, execution, access, commands } => {

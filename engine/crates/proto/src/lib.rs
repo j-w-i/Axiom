@@ -267,6 +267,10 @@ pub enum TodoState {
     Unknown,
 }
 
+fn fifty() -> u32 {
+    50
+}
+
 fn not(b: &bool) -> bool {
     !*b
 }
@@ -525,6 +529,76 @@ pub struct Changes {
     pub diff: String,
     /// All of it is here.
     pub whole: bool,
+    /// The repositories in the folder: `""` is the folder's own, others are paths below it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repositories: Vec<String>,
+    /// The branch it follows, and how far it is ahead and behind as git knew at the last fetch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+    /// What it is compared with, if not the last commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub against: Option<String>,
+    /// The branch that is the repository's own (its remote's `HEAD`, or `main` or `master`): a
+    /// commit to it is asked about once more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_branch: Option<String>,
+    /// The repository has hooks, which a commit or push from Axiom does not run (decision 0018).
+    #[serde(default, skip_serializing_if = "not")]
+    pub hooks: bool,
+    /// The remote a push or a pull talks to, and its address, as the repository says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+}
+
+/// Who commits, where the person's own git does not say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Author {
+    pub name: String,
+    pub email: String,
+}
+
+/// What a commit came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Committed {
+    pub commit: CommitInfo,
+    /// On a branch made for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Hooks the repository has were not run.
+    #[serde(default, skip_serializing_if = "not")]
+    pub hooks: bool,
+    /// The person's git would have signed it; it is not signed.
+    #[serde(default, skip_serializing_if = "not")]
+    pub unsigned: bool,
+    /// Files that changed while git read them: what was committed is what git read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<String>,
+}
+
+/// A commit, as the log says it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitInfo {
+    pub id: String,
+    pub author: String,
+    /// Seconds since 1970.
+    pub at: u64,
+    pub subject: String,
+}
+
+/// One commit: what it says and what it changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitShown {
+    pub commit: CommitInfo,
+    pub message: String,
+    /// A unified diff, without prefixes.
+    pub diff: String,
+    pub whole: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -532,6 +606,10 @@ pub struct Changed {
     pub path: String,
     /// `new`, `changed`, `removed` or `conflict`.
     pub what: String,
+    /// Of what is there now, as `copy.bring` and `git.commit` have it; absent if there is none, or
+    /// it is too large to be committed from here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 /// What an agent has changed in its own copy of the folder.
@@ -986,9 +1064,79 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "not")]
         plan: bool,
     },
-    /// What has been changed in a session's folder since its last commit.
+    /// What has been changed in a session's folder since its last commit, or since `against` (a
+    /// branch or a commit; with `base`, since where it and the branch that is out parted).
     #[serde(rename = "workspace.changes")]
-    Changes { session: SessionId },
+    Changes {
+        session: SessionId,
+        /// Of a repository below the folder, as `repositories` names it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        against: Option<String>,
+        #[serde(default, skip_serializing_if = "not")]
+        base: bool,
+    },
+    /// The last commits, newest first: an array of [`CommitInfo`].
+    #[serde(rename = "git.log")]
+    GitLog {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+        /// Of this branch or from this commit; the one that is out otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
+        #[serde(default = "fifty")]
+        most: u32,
+    },
+    /// One commit, with what it changed.
+    #[serde(rename = "git.show")]
+    GitShow {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+        commit: String,
+    },
+    /// Commits the files a person chose, each as they saw it (`digest`; absent: removed), with
+    /// their message, on a new branch if `branch` (decision 0018). On the repository's own branch
+    /// only with `onto_default`. Hooks do not run.
+    #[serde(rename = "git.commit")]
+    GitCommit {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+        files: Vec<CopySeen>,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        #[serde(default, skip_serializing_if = "not")]
+        onto_default: bool,
+        /// Where the person's own `~/.gitconfig` does not say who they are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        author: Option<Author>,
+    },
+    /// Sends the branch that is out to its remote, only as a fast-forward, with the person's own
+    /// credentials, outside the sandbox (decision 0018). Answers with what git said.
+    #[serde(rename = "git.push")]
+    GitPush {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+    },
+    /// Fetches the branch it follows and moves to it, only as a fast-forward.
+    #[serde(rename = "git.pull")]
+    GitPull {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+    },
+    /// The branches there are, its own and the remotes': an array of names.
+    #[serde(rename = "git.branches")]
+    GitBranches {
+        session: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repository: Option<String>,
+    },
     /// What an agent has changed in its own copy.
     #[serde(rename = "copy.changes")]
     CopyChanges { session: SessionId, agent: AgentId },

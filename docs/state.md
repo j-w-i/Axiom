@@ -97,6 +97,13 @@ Terminals (`m4/terminals`, stacked on `m4/folders`; decision 0022):
 - W-37: a folder's commands (name and what is typed, at most nine) are set from its menu in the list, shown in the panel, and run each in a new terminal by a press or by ⌥⌘1–9 (Ctrl+Alt elsewhere).
 - W-49 is not built: it needs decision 0021's sandbox change, with the browser.
 Verified on macOS 27 arm64: 59 Rust suites (880 tests), 503 app tests; Linux clippy of `axiom-spawn`. Breakages: 8 tried, 5 caught at once, two more after the tests were made stronger; one survives: without `TIOCSCTTY` the tests still pass, because Control-C typed into a terminal has not been seen to interrupt anything in the session that built this, also with Python's own `pty` (K57).
+Git (`m4/git`, stacked on `m4/terminals`; decision 0018):
+- W-45: the log, one commit with its message and diff, the changes against a branch or a commit or where it parted from the branch that is out. Read in the sandbox as before; what a person names is checked never to be an option, and given after `--end-of-options`.
+- W-46: up to 32 repositories in a folder, two levels down, never in a hidden or built folder; each with its own branch, changes, history and commit, chosen in the panel.
+- W-42: chosen files, each as it was shown (its digest), with a message, on a new branch if one is named; on the repository's own branch only after a second word. `Profile::persons_git` lets git write the repository's `.git` and nothing it runs or is told by; hooks never run, and the panel says so where a repository has some. Who commits comes from `~/.gitconfig` (its own lines, no includes), or is asked for that commit. Signing is not done, and said. A `.git` that is a file (worktree, submodule) is not committed in.
+- W-44: push and pull outside the sandbox with the person's own git, credentials and `ssh-agent`; only fast-forwards; refused when the repository's own configuration holds a key off a short list (`core.sshCommand`, `include`, `credential.*`, `url.*`, …), and a pull that would change a protected name is refused before it begins. How far ahead and behind, as of the last fetch, beside it. Tried against a local bare repository only: no network remote, no credential helper, no ssh.
+- W-43 (a suggested message) is not built: it waits for a model for short texts, which the owner's switch away from Axiom's own loop decides (T3 Code uses tool-less text generators for it).
+Verified on macOS 27 arm64: 59 Rust suites (889 tests), 504 app tests; Linux clippy of `axiom-spawn` and `axiom-policy`; the Seatbelt profile for a commit tried for real, bubblewrap's by CI only. Breakages: 11, all caught after two tests were made stronger.
 Verified for folders and files on macOS 27 arm64: 58 Rust suites (870 tests), 497 app tests, offscreen. Deliberate breakages: 11 in the host and tools (one survives: `..` in a path, which `Place` refuses before), 7 in the client, all caught after two tests were made stronger.
 
 ## The look, round 12 (`design/flat`)
@@ -114,7 +121,7 @@ Built on the owner's word (2026-11-25). In the pictures and not in the app, beca
 3. Owner: drag the window by its header and try full screen (K8).
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
 5. Somebody with the standing to do it: the security review (K32). It should see seccomp, branching's `points`, Bedrock, and now 0016: what a person may have a program given.
-6. M4's worth-building items left: W-38 beyond jobs, W-42 to W-46 (git), W-49 to W-52 (an agent's own server and the browser); then the owner's switch away from Axiom's own loop, then M5, which begins with taking back what was said.
+6. M4's worth-building items left: W-38 beyond jobs, W-43 (waits for the switch), W-49 to W-52 (an agent's own server and the browser); then the owner's switch away from Axiom's own loop, then M5, which begins with taking back what was said.
 
 ## The owner's next direction (2026-11-26)
 After M4, Axiom stops being a harness: models that no harness provides run on DeepSeek Harness (dsh, headless), and Axiom gives every agent tools for its own features. Storage used well, little downloaded. Not begun; first the owner wants a report on how T3 Code does it (agent loop, browser, simulators), and what becomes of Axiom's own loop is not decided.

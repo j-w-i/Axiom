@@ -372,6 +372,58 @@ fn main() -> Result<(), serde_json::Error> {
                 ended: None,
             })?,
         },
+        Message::Ok {
+            id: 17,
+            result: serde_json::to_value(Changes {
+                repository: true,
+                branch: Some("topic".into()),
+                files: vec![Changed {
+                    path: "a.rs".into(),
+                    what: "changed".into(),
+                    digest: Some("d1".into()),
+                }],
+                diff: "--- a.rs\n+++ a.rs\n".into(),
+                whole: false,
+                repositories: vec![String::new(), "api".into()],
+                upstream: Some("origin/topic".into()),
+                ahead: Some(2),
+                behind: Some(1),
+                against: Some("main".into()),
+                default_branch: Some("main".into()),
+                hooks: true,
+                remote: Some("origin".into()),
+                remote_url: Some("git@example.com:a/b.git".into()),
+            })?,
+        },
+        Message::Ok {
+            id: 18,
+            result: serde_json::to_value(CommitShown {
+                commit: CommitInfo {
+                    id: "c1".into(),
+                    author: "Ada".into(),
+                    at: 1_700_000_000,
+                    subject: "S".into(),
+                },
+                message: "S\n\nB".into(),
+                diff: "x".into(),
+                whole: true,
+            })?,
+        },
+        Message::Ok {
+            id: 19,
+            result: serde_json::to_value(Committed {
+                commit: CommitInfo {
+                    id: "c2".into(),
+                    author: "Ada".into(),
+                    at: 1,
+                    subject: "T".into(),
+                },
+                branch: Some("b".into()),
+                hooks: true,
+                unsigned: true,
+                changed: vec!["a.rs".into()],
+            })?,
+        },
         Message::Open { open: "/w".into() },
     ] {
         println!("{}", serde_json::to_string(&m)?);

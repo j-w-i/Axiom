@@ -32,6 +32,18 @@ class FolderChanges extends ChangeNotifier {
   Changes? all;
   List<(Changed, FileDiff)> files = const [];
 
+  /// Which repository of the folder, and what it is compared with: the last commit if null.
+  String? repository, against;
+  bool base = false;
+
+  void compare({String? repository, String? against, bool base = false}) {
+    this.repository = repository ?? this.repository;
+    this.against = against;
+    this.base = base;
+    opened.clear();
+    unawaited(look());
+  }
+
   /// The files whose change is read.
   final opened = <String>{};
   bool get reads =>
@@ -81,7 +93,12 @@ class FolderChanges extends ChangeNotifier {
     try {
       do {
         _again = false;
-        final c = await store.changes(session.id);
+        final c = await store.changes(
+          session.id,
+          repository: repository,
+          against: against,
+          base: base,
+        );
         all = c;
         final read = {for (final f in readDiffs(c.diff, most: 600)) f.path: f};
         files = [for (final f in c.files) (f, read[f.path] ?? FileDiff(f.path))];
@@ -143,6 +160,80 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
     unawaited(widget.changes.lookOnce());
   }
 
+  /// Files a person has taken out of what is committed.
+  final _left = <String>{};
+  final _message = TextEditingController(), _branch = TextEditingController();
+  final _name = TextEditingController(), _email = TextEditingController();
+  bool _busy = false, _onto = false, _who = false;
+  String? _said, _failed;
+  List<String> _branches = const [];
+
+  @override
+  void dispose() {
+    _message.dispose();
+    _branch.dispose();
+    _name.dispose();
+    _email.dispose();
+    super.dispose();
+  }
+
+  FolderChanges get _now => widget.changes;
+
+  Future<void> _git(String what, Future<String> Function() f) async {
+    setState(() {
+      _busy = true;
+      _said = null;
+      _failed = null;
+    });
+    try {
+      final words = await f();
+      if (mounted) setState(() => _said = words);
+      await _now.look();
+    } on Object catch (e) {
+      if (mounted) setState(() => _failed = '$what: ${wordsOf(e)}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  bool _can(Changed f) => f.digest != null || f.what == 'removed';
+
+  Future<void> _commit(Changes all, List<Changed> chosen) async {
+    final branch = _branch.text.trim();
+    final onDefault =
+        branch.isEmpty && all.defaultBranch != null && all.branch == all.defaultBranch;
+    if (onDefault && !_onto) {
+      setState(() => _onto = true);
+      return;
+    }
+    final who = _who && _name.text.trim().isNotEmpty
+        ? (_name.text.trim(), _email.text.trim())
+        : null;
+    await _git('Nothing was committed', () async {
+      final done = await _now.store.commit(
+        _now.session.id,
+        [for (final f in chosen) (f.path, f.digest)],
+        _message.text,
+        repository: _now.repository,
+        branch: branch.isEmpty ? null : branch,
+        ontoDefault: onDefault,
+        author: who,
+      );
+      _message.clear();
+      _branch.clear();
+      _onto = false;
+      _left.clear();
+      return [
+        'Committed ${done.commit.id.substring(0, done.commit.id.length.clamp(0, 8))}'
+            '${done.branch == null ? '' : ' on ${done.branch}'}.',
+        if (done.hooks) 'The repository\'s hooks did not run.',
+        if (done.unsigned) 'It is not signed, though your git signs commits.',
+        if (done.changed.isNotEmpty) 'Changed while git read them: ${done.changed.join(', ')}.',
+      ].join(' ');
+    });
+    if (_failed?.contains('who commits') ?? false) setState(() => _who = true);
+  }
+
   @override
   void didUpdateWidget(ChangesView old) {
     super.didUpdateWidget(old);
@@ -153,6 +244,212 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
   @override
   Widget build(BuildContext context) =>
       ListenableBuilder(listenable: widget.changes, builder: (context, _) => _build(context));
+
+  /// The repository, what it is compared with, and how it stands beside its remote.
+  Widget _bar(AxTheme t, Changes all) {
+    final c = t.colors, now = _now;
+    final apart = [
+      if (all.ahead case final a? when a > 0) '$a to push',
+      if (all.behind case final b? when b > 0) '$b to pull',
+    ];
+    final compare = <AxMenuItem<(String?, bool)>>[
+      const AxMenuItem((null, false), 'Since the last commit'),
+      for (final b in _branches.take(30)) ...[
+        AxMenuItem((b, false), 'Since $b'),
+        AxMenuItem((b, true), 'Since where $b parted'),
+      ],
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, 9, 8),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (all.repositories.length > 1)
+            AxSelect<String>(
+              label: 'Repository',
+              quiet: true,
+              items: [
+                for (final r in all.repositories)
+                  AxMenuItem(r, r.isEmpty ? 'This folder' : oneLine(literal(r), 60)),
+              ],
+              value: now.repository ?? all.repositories.first,
+              onChanged: (r) => now.compare(repository: r),
+            ),
+          if (all.repository)
+            AxPopover(
+              width: 280,
+              anchor: (context, open, toggle) => AxChip(
+                label: 'Compare: ${all.against ?? 'since the last commit'}',
+                words: all.against == null
+                    ? 'Since the last commit'
+                    : 'Since ${oneLine(literal(all.against!), 40)}',
+                icon: AxIcon.branch,
+                open: open,
+                onPressed: () {
+                  if (_branches.isEmpty) {
+                    unawaited(
+                      now.store.gitBranches(now.session.id, repository: now.repository).then((b) {
+                        if (mounted) setState(() => _branches = b);
+                      }, onError: (Object _) {}),
+                    );
+                  }
+                  toggle();
+                },
+              ),
+              panel: (context, close) => AxMenu<(String?, bool)>(
+                label: 'Compare with',
+                items: compare,
+                value: (now.against, now.base),
+                onChosen: (v) {
+                  close();
+                  now.compare(against: v.$1, base: v.$2);
+                },
+              ),
+            ),
+          if (all.upstream case final u?)
+            Text(
+              apart.isEmpty
+                  ? 'Even with ${oneLine(literal(u), 40)}'
+                  : '${apart.join(', ')} (${oneLine(literal(u), 40)}, as of the last fetch)',
+              style: t.type.small.ink(c.ink3),
+            ),
+          if (all.remote != null) ...[
+            AxButton(
+              label: 'Pull',
+              tone: AxTone.quiet,
+              onPressed: _busy
+                  ? null
+                  : () => unawaited(
+                      _git(
+                        'Not pulled',
+                        () => now.store.pull(now.session.id, repository: now.repository),
+                      ),
+                    ),
+            ),
+            AxButton(
+              label: 'Push',
+              tone: AxTone.quiet,
+              onPressed: _busy || (all.ahead ?? 1) == 0
+                  ? null
+                  : () => unawaited(
+                      _git(
+                        'Not pushed',
+                        () => now.store.push(now.session.id, repository: now.repository),
+                      ),
+                    ),
+            ),
+          ],
+          if ((_failed ?? _said) case final w?)
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                visible(w),
+                style: t.type.small.ink(_failed != null ? c.faultText : c.ink2),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// What is chosen goes in with a message: on a new branch if one is named.
+  Widget _commitBox(AxTheme t, Changes all, List<Changed> chosen) {
+    final c = t.colors;
+    final branch = all.branch ?? '';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 10, 0, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AxField(
+            label: 'Commit message',
+            placeholder: 'What this changes, and why',
+            controller: _message,
+            lines: 3,
+          ),
+          const SizedBox(height: 6),
+          if (_who) ...[
+            Text(
+              'Git does not say who you are. It is kept with this commit only.',
+              style: t.type.small.ink(c.ink3),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: AxField(label: 'Your name', placeholder: 'Your name', controller: _name),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: AxField(
+                    label: 'Your email',
+                    placeholder: 'Your email',
+                    controller: _email,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: AxField(
+                  label: 'New branch',
+                  placeholder: branch.isEmpty
+                      ? 'New branch, if wanted'
+                      : 'On $branch, or a new branch',
+                  controller: _branch,
+                  mono: true,
+                ),
+              ),
+              const SizedBox(width: 6),
+              ListenableBuilder(
+                listenable: _message,
+                builder: (context, _) => AxButton(
+                  label: chosen.length == 1 ? 'Commit 1 file' : 'Commit ${chosen.length} files',
+                  tone: AxTone.primary,
+                  onPressed: _busy || chosen.isEmpty || _message.text.trim().isEmpty
+                      ? null
+                      : () => unawaited(_commit(all, chosen)),
+                ),
+              ),
+            ],
+          ),
+          if (_onto)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    '$branch is the repository\'s own branch. Commit to it?',
+                    style: t.type.ui.ink(c.ink1),
+                  ),
+                  AxButton(
+                    label: 'Commit to $branch',
+                    onPressed: _busy ? null : () => unawaited(_commit(all, chosen)),
+                  ),
+                  AxButton(label: 'Cancel', onPressed: () => setState(() => _onto = false)),
+                ],
+              ),
+            ),
+          if (all.hooks)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'This repository has hooks. Axiom does not run them: what they check is not checked.',
+                style: t.type.small.ink(c.attentionText),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _build(BuildContext context) {
     final now = widget.changes;
@@ -211,6 +508,8 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
         folded: now.folded,
         onFold: now.fold,
       ),
+      if (all != null && (all.repository || all.repositories.length > 1) && !now.folded)
+        _bar(t, all),
       if (problem != null && all != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, AxSpace.card, 8),
@@ -226,7 +525,18 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
         ),
     ];
     final more = words == null && !all!.whole && !now.folded ? 1 : 0;
-    final tail = [if (widget.tail.isNotEmpty) const SizedBox(height: 10), ...widget.tail];
+    final commits = all != null && all.repository && all.against == null && n > 0 && !now.folded;
+    final chosen = [
+      for (final f in files)
+        if (_can(f.$1) && !_left.contains(f.$1.path)) f.$1,
+    ];
+    final tail = [
+      if (commits) _commitBox(t, all, chosen),
+      if (all?.repository ?? false)
+        GitHistory(now, key: ValueKey((now.session.id, now.repository ?? ''))),
+      if (widget.tail.isNotEmpty) const SizedBox(height: 10),
+      ...widget.tail,
+    ];
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(8, 0, AxSpace.edge, AxSpace.edge),
       itemCount: head.length + shown + more + tail.length,
@@ -256,6 +566,19 @@ class _ChangesViewState extends State<ChangesView> with _Remarks<ChangesView> {
       onRead: f.$1.what == 'removed' || widget.onRead == null
           ? null
           : () => widget.onRead!(f.$1.path),
+      leading: widget.changes.all?.against != null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(left: 6, right: 4),
+              child: AxCheck(
+                label: 'Commit ${f.$1.path}',
+                bare: true,
+                value: _can(f.$1) && !_left.contains(f.$1.path),
+                onChanged: !_can(f.$1) || _busy
+                    ? null
+                    : (v) => setState(() => v ? _left.remove(f.$1.path) : _left.add(f.$1.path)),
+              ),
+            ),
     ),
   );
 }
@@ -1039,6 +1362,111 @@ class DiffMenu extends StatelessWidget {
               onClose?.call();
           }
         },
+      ),
+    );
+  }
+}
+
+/// The last commits of a repository, folded until asked for; one pressed shows its message and
+/// what it changed.
+class GitHistory extends StatefulWidget {
+  const GitHistory(this.changes, {super.key});
+  final FolderChanges changes;
+  @override
+  State<GitHistory> createState() => _GitHistoryState();
+}
+
+class _GitHistoryState extends State<GitHistory> {
+  bool _folded = true;
+  List<CommitInfo>? _log;
+  String? _problem, _open;
+  CommitShown? _shown;
+
+  Future<void> _load() async {
+    final c = widget.changes;
+    try {
+      final log = await c.store.gitLog(c.session.id, repository: c.repository);
+      if (mounted) setState(() => _log = log);
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    }
+  }
+
+  Future<void> _show(CommitInfo x) async {
+    if (_open == x.id) {
+      setState(() {
+        _open = null;
+        _shown = null;
+      });
+      return;
+    }
+    setState(() {
+      _open = x.id;
+      _shown = null;
+    });
+    final c = widget.changes;
+    try {
+      final s = await c.store.gitShow(c.session.id, x.id, repository: c.repository);
+      if (mounted && _open == x.id) setState(() => _shown = s);
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Ax.of(context), c = t.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: PanelGroup(
+        'History',
+        null,
+        folded: _folded,
+        onFold: () {
+          setState(() => _folded = !_folded);
+          if (!_folded && _log == null) unawaited(_load());
+        },
+        [
+          if (_problem case final p?)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AxSpace.card, 4, AxSpace.card, 4),
+              child: Text(visible(p), style: t.type.small.ink(c.faultText)),
+            ),
+          for (final x in _log ?? const <CommitInfo>[]) ...[
+            ChangedRow(
+              oneLine(literal(x.subject), 120),
+              added: 0,
+              removed: 0,
+              what:
+                  '${x.id.substring(0, x.id.length.clamp(0, 7))} · ${oneLine(literal(x.author), 40)}',
+              open: _open == x.id,
+              onPressed: () => unawaited(_show(x)),
+            ),
+            if (_shown case final s? when _open == x.id)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+                      child: Text(visible(s.message), style: t.type.ui.ink(c.ink2)),
+                    ),
+                    for (final f in readDiffs(s.diff, most: 300)) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 6, 4, 4),
+                        child: Text(
+                          oneLine(literal(f.path), 200),
+                          style: t.type.smallStrong.ink(c.ink2),
+                        ),
+                      ),
+                      DiffLines(f.lines, shape: diffShape(context)),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ],
       ),
     );
   }

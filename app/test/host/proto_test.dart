@@ -156,6 +156,38 @@ void main() {
     expect([sc.terminal, sc.version, sc.cols, sc.cursor, sc.title], ['t_1', 7, 80, (0, 5), 'T']);
     expect([sc.back, sc.mostBack, sc.appCursor, sc.bracketed, sc.ended], [3, 40, true, true, null]);
     expect(sc.text, '\$ red\n');
+    final ch = Changes.decode(result(17)! as Json);
+    expect(
+      [ch.branch, ch.files.single.digest, ch.repositories, ch.upstream],
+      [
+        'topic',
+        'd1',
+        ['', 'api'],
+        'origin/topic',
+      ],
+    );
+    expect(
+      [ch.ahead, ch.behind, ch.against, ch.defaultBranch, ch.hooks],
+      [2, 1, 'main', 'main', true],
+    );
+    expect([ch.remote, ch.remoteUrl, ch.whole], ['origin', 'git@example.com:a/b.git', false]);
+    final shown = CommitShown.decode(result(18)! as Json);
+    expect(
+      [shown.commit.id, shown.commit.author, shown.commit.at, shown.commit.subject],
+      ['c1', 'Ada', 1700000000, 'S'],
+    );
+    expect([shown.message, shown.diff, shown.whole], ['S\n\nB', 'x', true]);
+    final done = Committed.decode(result(19)! as Json);
+    expect(
+      [done.commit.subject, done.branch, done.hooks, done.unsigned, done.changed],
+      [
+        'T',
+        'b',
+        true,
+        true,
+        ['a.rs'],
+      ],
+    );
     final red = sc.rows.first.last;
     expect([red.text, red.fg, red.bg, red.style], ['red', '1', '#102030', 17]);
     final e = EditorInfo.decode((result(13)! as List<Object?>).single! as Json);

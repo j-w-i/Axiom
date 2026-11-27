@@ -60,7 +60,26 @@ pub fn wrap(job: &Job, real: &Real) -> Result<(OsString, Vec<OsString>), SpawnEr
     }
     for root in &write {
         for p in names(root, MOST).ok_or_else(too_many)? {
+            // A git folder a person's commit writes is written, but for what is kept in it.
+            if real.vcs.iter().any(|v| v.as_path() == p) {
+                continue;
+            }
             add(&[&"--ro-bind", &p, &p]);
+        }
+    }
+    for k in &real.kept {
+        match std::fs::symlink_metadata(k.as_path()) {
+            Ok(_) => add(&[&"--ro-bind", &k.as_path(), &k.as_path()]),
+            // What is not there yet could be made, and then git would be told by it: an empty place
+            // that cannot be written to stands in for it. Its mount point is left behind, empty.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if k.name().starts_with("config") {
+                    add(&[&"--ro-bind", &"/dev/null", &k.as_path()]);
+                } else {
+                    add(&[&"--tmpfs", &k.as_path(), &"--remount-ro", &k.as_path()]);
+                }
+            }
+            Err(e) => return Err(SpawnError::Root(k.clone(), e)),
         }
     }
     // Links of the system's old names: /bin -> usr/bin.

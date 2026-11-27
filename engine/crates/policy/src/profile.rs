@@ -129,7 +129,15 @@ pub struct Profile {
     write: Reach,
     net: Net,
     hidden: Vec<Place>,
+    /// Git folders written by a person's own act (decision 0018), in spite of their protected name:
+    /// all but what git runs or is told by, which stays protected.
+    vcs: Vec<Place>,
 }
+
+/// What stays protected inside a git folder that a person's commit writes: what git runs, what
+/// configures it, what decides what it takes, and the same of submodules.
+pub const VCS_KEPT: &[&str] =
+    &["hooks", "config", "config.worktree", "info", "modules", "worktrees"];
 
 impl Profile {
     /// `system` is read by every program: libraries, tools, certificates. `scratch` is this agent's
@@ -178,7 +186,39 @@ impl Profile {
             net: caps.net.clone(),
             hidden: keep.hidden().cloned().collect(),
             write: Reach::of(write),
+            vcs: Vec::new(),
         })
+    }
+
+    /// For a person's own commit, branch or fast-forward (decision 0018), never for an agent: what
+    /// `caps` reads, without a network, and `git_dir` written, the repository's own `.git`, but not
+    /// what is kept in it ([`VCS_KEPT`]). With `folder`, the folder that holds it too, whose
+    /// protected names stay protected.
+    pub fn persons_git(
+        caps: &Caps,
+        keep: &Keep,
+        system: &Reach,
+        scratch: &Place,
+        git_dir: &Place,
+        folder: bool,
+    ) -> Result<Self, BadProfile> {
+        let parent = git_dir.parent().ok_or_else(|| BadProfile::TooWide(git_dir.clone()))?;
+        if git_dir.name() != ".git" || !caps.read.covers(&parent) {
+            return Err(BadProfile::TooWide(git_dir.clone()));
+        }
+        let write = if folder { Reach::of([parent]) } else { Reach::none() };
+        let caps = Caps { write, net: Net::none(), ..caps.clone() };
+        let mut p = Self::of(&caps, keep, system, scratch)?;
+        if keep.hides(git_dir) {
+            return Err(BadProfile::Secret(git_dir.clone()));
+        }
+        p.write = Reach::of(p.write.roots().iter().cloned().chain([git_dir.clone()]));
+        p.vcs = vec![git_dir.clone()];
+        Ok(p)
+    }
+
+    pub fn vcs(&self) -> &[Place] {
+        &self.vcs
     }
 
     /// The same without writing (except the scratch folder) and without a network.
@@ -229,6 +269,37 @@ mod tests {
     }
     fn of(c: &Caps) -> Result<Profile, BadProfile> {
         Profile::of(c, &keep(), &Reach::of([p("/usr")]), &p("/tmp/x"))
+    }
+
+    #[test]
+    fn a_persons_commit_writes_the_git_folder_and_nothing_else() {
+        let reads = caps(&["/h/me/w"], &[]);
+        let git = p("/h/me/w/.git");
+        let c = Profile::persons_git(
+            &reads,
+            &keep(),
+            &Reach::of([p("/usr")]),
+            &p("/tmp/x"),
+            &git,
+            false,
+        )
+        .unwrap();
+        assert_eq!(c.vcs(), std::slice::from_ref(&git));
+        assert!(c.write().covers(&p("/h/me/w/.git/objects")));
+        assert!(!c.write().covers(&p("/h/me/w/a.rs")));
+        assert!(c.net().is_empty());
+        let m = Profile::persons_git(&reads, &keep(), &Reach::none(), &p("/tmp/x"), &git, true)
+            .unwrap();
+        assert!(m.write().covers(&p("/h/me/w/a.rs")));
+        for bad in ["/h/me/w/.git/hooks", "/h/me/x/.git", "/h/me/w/.gitx", "/"] {
+            let r =
+                Profile::persons_git(&reads, &keep(), &Reach::none(), &p("/tmp/x"), &p(bad), false);
+            assert!(r.is_err(), "{bad}");
+        }
+        assert!(
+            Profile::of(&caps(&[], &["/h/me/w/.git"]), &keep(), &Reach::none(), &p("/tmp/x"))
+                .is_err()
+        );
     }
 
     #[test]
