@@ -66,7 +66,9 @@ pub fn understand(v: &Value) -> Result<Act, String> {
 /// harness (decision 0023).
 pub type Theirs = Arc<dyn Fn() -> Vec<u32> + Send + Sync>;
 
+/// Read by the browser's gate, which there is only where a browser can be started.
 #[derive(Clone)]
+#[cfg_attr(not(unix), allow(dead_code))]
 struct Program(Theirs);
 impl std::fmt::Debug for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
