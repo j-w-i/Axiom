@@ -27,6 +27,7 @@ import '../ui/status.dart';
 import '../ui/surface.dart';
 import '../ui/tokens.dart';
 import '../ui/zoom.dart';
+import 'browser.dart';
 import 'changes.dart';
 import 'drafts.dart';
 import 'drop.dart';
@@ -1669,7 +1670,13 @@ class _Display extends StatelessWidget {
         final lead = [
           if (a.plans) AgentPlan(a, key: ValueKey((a.id, 'plan'))),
           if (look.finding) FileFinder(look, key: ValueKey((session.id, 'find'))),
-          JobsPart(store, session.id, names: names, key: ValueKey((session.id, 'jobs'))),
+          JobsPart(
+            store,
+            session.id,
+            names: names,
+            onBrowse: Browsers.made ? look.showBrowser : null,
+            key: ValueKey((session.id, 'jobs')),
+          ),
           if (Terminals.made)
             TerminalsPart(
               store,
@@ -1680,7 +1687,8 @@ class _Display extends StatelessWidget {
             ),
         ];
         final tail = [FileTree(look, key: ValueKey((session.id, a.apart ? a.id : '', 'tree')))];
-        final reading = look.reads || look.searching || look.terminal != null;
+        final reading =
+            look.reads || look.searching || look.terminal != null || look.browser != null;
         final panel = !open()
             ? null
             : CallbackShortcuts(
@@ -1688,13 +1696,27 @@ class _Display extends StatelessWidget {
                   // Escape is a terminal's own.
                   if (look.terminal == null)
                     const SingleActivator(LogicalKeyboardKey.escape): reading
-                        ? () => look.reads ? look.close() : look.search(false)
+                        ? () => look.reads
+                              ? look.close()
+                              : look.browser != null
+                              ? look.showBrowser(null)
+                              : look.search(false)
                         : onClose,
                 },
                 child: CommandArea(
                   3,
                   child: FocusTraversalGroup(
-                    child: look.terminal != null
+                    child: look.browser != null
+                        ? AgentPage(
+                            store,
+                            session.id,
+                            look.browser!,
+                            name: names[look.browser!],
+                            draft: drafts.of(session.id, a.id),
+                            onClose: () => look.showBrowser(null),
+                            key: ValueKey((session.id, 'page', look.browser)),
+                          )
+                        : look.terminal != null
                         ? TerminalView(
                             store,
                             look.terminal!,

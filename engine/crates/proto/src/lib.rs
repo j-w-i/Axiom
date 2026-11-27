@@ -783,6 +783,9 @@ pub struct ProcessInfo {
     /// Its parent has ended: it was left behind, and ends with the job all the same.
     #[serde(default, skip_serializing_if = "not")]
     pub orphan: bool,
+    /// The ports it listens on, on this computer's loopback address: a server (decision 0021).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
 }
 
 /// An editor of the person's own that was found.
@@ -830,6 +833,92 @@ pub struct FolderCommand {
     /// 1 to 9: with the keys of the window it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<u8>,
+}
+
+/// An agent's browser (decision 0021): one page, of what its jobs serve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserInfo {
+    pub session: SessionId,
+    pub agent: AgentId,
+    pub url: String,
+    pub title: String,
+    /// Its person holds it: the agent waits.
+    #[serde(default, skip_serializing_if = "not")]
+    pub person: bool,
+}
+
+/// What a person is shown of an agent's browser: a picture, never the page itself (SI-14).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowserView {
+    pub version: u64,
+    /// JPEG, in base64; absent until there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub url: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "not")]
+    pub person: bool,
+    #[serde(default, skip_serializing_if = "not")]
+    pub dark: bool,
+    #[serde(default, skip_serializing_if = "not")]
+    pub loading: bool,
+    /// What the page asked for and was refused, last first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+}
+
+/// What a person does on the page while they hold it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrowserInput {
+    /// `event`: pressed, released, moved. `button`: left, middle, right, none.
+    Mouse {
+        event: String,
+        x: f64,
+        y: f64,
+        button: String,
+        #[serde(default)]
+        clicks: u32,
+        #[serde(default)]
+        modifiers: u32,
+    },
+    Wheel {
+        x: f64,
+        y: f64,
+        dx: f64,
+        dy: f64,
+    },
+    /// `event`: down, up; `key` and `code` as the DOM names them.
+    Key {
+        event: String,
+        key: String,
+        code: String,
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        modifiers: u32,
+    },
+    Text {
+        text: String,
+    },
+}
+
+/// What a person pointed at on an agent's page, for their draft (W-51). All of it is the page's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pointed {
+    pub selector: String,
+    pub text: String,
+    pub styles: Vec<(String, String)>,
+    /// Left, top, width, height, in the page's pixels.
+    pub rect: [f64; 4],
+    /// PNG, in base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
+    pub url: String,
 }
 
 /// A person's own terminal (decision 0022).
@@ -1436,6 +1525,33 @@ pub enum Call {
         #[serde(default, skip_serializing_if = "not")]
         force: bool,
     },
+    /// The browsers agents have open: an array of [`BrowserInfo`].
+    #[serde(rename = "browser.list")]
+    Browsers {},
+    /// Opens what an agent's job serves at `port` in that agent's browser, started if need be.
+    #[serde(rename = "browser.open")]
+    BrowserOpen { session: SessionId, agent: AgentId, port: u16 },
+    /// Its view, once its version is past `seen`, or as it is after a while. A [`BrowserView`].
+    #[serde(rename = "browser.view")]
+    BrowserView {
+        session: SessionId,
+        agent: AgentId,
+        #[serde(default)]
+        seen: u64,
+    },
+    /// Its person takes the page, or gives it back.
+    #[serde(rename = "browser.hold")]
+    BrowserHold { session: SessionId, agent: AgentId, person: bool },
+    #[serde(rename = "browser.input")]
+    BrowserInput { session: SessionId, agent: AgentId, input: BrowserInput },
+    /// How large the page is, and whether it is dark.
+    #[serde(rename = "browser.size")]
+    BrowserSize { session: SessionId, agent: AgentId, width: u32, height: u32, dark: bool },
+    /// What is at a point of the page. A [`Pointed`].
+    #[serde(rename = "browser.point")]
+    BrowserPoint { session: SessionId, agent: AgentId, x: f64, y: f64 },
+    #[serde(rename = "browser.close")]
+    BrowserClose { session: SessionId, agent: AgentId },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {

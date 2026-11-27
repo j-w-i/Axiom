@@ -1,0 +1,23 @@
+[package]
+name = "axiom-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Nothing on Windows: there is no browser there yet (decision 0021).
+[target.'cfg(unix)'.dependencies]
+axiom-policy.workspace = true
+axiom-spawn.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+# Bodies and pictures over the DevTools pipe are in base64; the crate is in the tree already (rustls).
+base64 = "0.23"
+
+[target.'cfg(unix)'.dev-dependencies]
+tempfile.workspace = true

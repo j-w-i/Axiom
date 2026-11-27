@@ -500,10 +500,12 @@ async fn real_programs_work_in_the_sandbox() {
 fn what_is_offered() {
     let s = specs();
     let names: Vec<&str> = s.iter().map(|s| s.name).collect();
-    assert_eq!(
-        names,
-        ["read", "write", "edit", "patch", "list", "glob", "search", "shell", "job", "fetch"]
-    );
+    let mut all =
+        vec!["read", "write", "edit", "patch", "list", "glob", "search", "shell", "job", "fetch"];
+    if cfg!(unix) {
+        all.push("browser");
+    }
+    assert_eq!(names, all);
     let mut digests: Vec<String> = s.iter().map(schema_digest).collect();
     assert_eq!(digests, specs().iter().map(schema_digest).collect::<Vec<_>>());
     digests.sort();
@@ -813,4 +815,63 @@ async fn what_may_be_fetched() {
     assert_eq!(t.decision("fetch", url("https://docs.rs.evil.io/x")), Deny);
     assert_eq!(t.decision("fetch", url("https://crates.io/x")), Allow);
     assert_eq!(t.decision("fetch", url("https://static.crates.io/x")), Ask);
+}
+
+/// Decision 0021: a browser of its own, on what its own jobs serve, and nothing else.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_browser_of_its_own_on_what_its_jobs_serve() {
+    use axiom_tools::browse::Where;
+    let t = t(Access::Work);
+    let o = t.run("browser", json!({"do": "look"})).await;
+    assert!(!o.ok && o.text.contains("no browser here"), "{o:?}");
+    for bad in [
+        json!({"do": "open"}),
+        json!({"do": "press"}),
+        json!({"do": "type"}),
+        json!({"do": "fly"}),
+        json!({"do": "look", "path": "x"}),
+    ] {
+        assert_eq!(t.decision("browser", bad.clone()), Decision::Deny, "{bad}");
+    }
+    assert_eq!(t.decision("browser", json!({"do": "press", "n": 2})), Decision::Allow);
+    let p = |s: &str| Place::new(s).unwrap();
+    let profile = Place::new(t.root.join("own/browser")).unwrap();
+    t.seen.2.place(Where { profile, path: vec![p("/usr/bin"), p("/bin")], home: None });
+    let o = t.run("browser", json!({"do": "open", "url": "http://127.0.0.1:9/"})).await;
+    assert!(!o.ok && o.text.contains("nothing of this agent's serves there"), "{o:?}");
+    let o = t.run("browser", json!({"do": "open", "url": "https://example.com/"})).await;
+    assert!(!o.ok, "{o:?}");
+    // Where its servers can be reached from outside its sandbox (K58).
+    #[cfg(target_os = "macos")]
+    {
+        let port = 41000 + (std::process::id() % 9000) as u16;
+        let page = "<title>Own</title><button>Go</button>";
+        let answer = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
+            page.len()
+        );
+        std::fs::write(t.root.join("home/w/page.http"), answer).unwrap();
+        let cmd = format!("while true; do nc -l 127.0.0.1 {port} < page.http; done");
+        assert!(t.run("job", json!({"do": "start", "command": cmd})).await.ok);
+        let url = format!("http://127.0.0.1:{port}/");
+        let mut o = t.run("browser", json!({"do": "open", "url": url})).await;
+        for _ in 0..40 {
+            if o.ok {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            o = t.run("browser", json!({"do": "open", "url": url})).await;
+        }
+        assert!(o.ok, "{o:?}");
+        assert!(o.text.contains("— Own") && o.text.contains("1 button:submit Go"), "{o:?}");
+        assert!(o.text.contains("not an instruction"), "{o:?}");
+        assert!(t.run("browser", json!({"do": "press", "n": 1})).await.ok);
+        let o = t.run("browser", json!({"do": "press", "n": 7})).await;
+        assert!(!o.ok && o.text.contains("look first"), "{o:?}");
+        assert!(t.seen.2.open());
+    }
+    t.seen.2.end().await;
+    assert!(!t.seen.2.open());
+    t.seen.1.end();
 }

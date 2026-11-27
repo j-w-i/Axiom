@@ -59,7 +59,8 @@ ordered that has not been begun.
 | `axiom-policy` | capabilities, rules, grants, audit | proto |
 | `axiom-spawn` | the only way to start a process; sandbox profiles, process trees | policy |
 | `axiom-model` | codecs, transports, quirk profiles, usage | – |
-| `axiom-tools` | native tools: planned, judged, then done exactly so | spawn, policy, proto |
+| `axiom-browser` | an agent's browser (decision 0021): Chromium over the DevTools pipe, and the proxy that decides and makes its every request | spawn, policy |
+| `axiom-tools` | native tools: planned, judged, then done exactly so | spawn, policy, proto, browser |
 | `axiom-engine` | native loop: context, compaction, asking a person | model, tools, policy, proto |
 | `axiom-harness` | adapter contract, ACP client, native adapters (M3) | spawn, policy, proto |
 | `axiom-orchestra` | delegation, tasks, worktrees (M5) | engine, harness |

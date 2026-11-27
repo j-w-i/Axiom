@@ -90,6 +90,14 @@ impl Unsandboxed {
     pub fn persons(_act: PersonsOwn) -> Self {
         Self(())
     }
+
+    /// The browser of decision 0021, which an agent's tool may start: a Chromium of the system's,
+    /// headless, under the host's control over a pipe, with a profile of Axiom's own and every
+    /// request it makes decided and made by the host. Only `axiom-spawn`'s `spawn_browser` takes it,
+    /// and that starts nothing else.
+    pub fn browser() -> Self {
+        Self(())
+    }
 }
 
 impl Approval {

@@ -138,6 +138,7 @@ void main() {
       [p.pid, p.parent, p.name, p.cpuMs, p.memory, p.orphan],
       [41, 1, 'node', 1500, 4096, true],
     );
+    expect(p.ports, [5173]);
     final d = FolderInfo.decode((result(14)! as List<Object?>).single! as Json);
     expect(
       [d.id, d.path, d.name, d.pinned, d.access, d.moved],
@@ -186,6 +187,37 @@ void main() {
         true,
         true,
         ['a.rs'],
+      ],
+    );
+    final b = BrowserInfo.decode((result(20)! as List<Object?>).single! as Json);
+    expect(
+      [b.session, b.agent, b.url, b.title, b.person],
+      ['s_1', 'a_1', 'http://127.0.0.1:5173/', 'App', true],
+    );
+    final v = BrowserView.decode(result(21)! as Json);
+    expect(
+      [v.version, v.frame, v.width, v.height, v.person, v.dark, v.loading, v.refused, v.ended],
+      [
+        7,
+        '/9j/',
+        1280,
+        800,
+        true,
+        true,
+        false,
+        ['https://example.com/a.png'],
+        null,
+      ],
+    );
+    final pointed = Pointed.decode(result(22)! as Json);
+    expect(
+      [pointed.selector, pointed.text, pointed.styles, pointed.rect, pointed.picture],
+      [
+        'main > h1.big',
+        'Hello',
+        [('font-size', '32px')],
+        [8.0, 21.5, 300.0, 37.0],
+        'iVBO',
       ],
     );
     final red = sc.rows.first.last;

@@ -5,6 +5,8 @@
 mod common;
 use common::*;
 
+use axiom_spawn::spawn;
+
 /// SI-11: whatever is protected is so before it exists, anywhere, however it is spelled.
 #[tokio::test]
 async fn protected_names_cannot_be_made() {
@@ -81,4 +83,40 @@ async fn nobody_else_is_made_to_start_anything() {
         let o = f.sh(s).await;
         assert!(!o.ok(), "{s}: {o:?}");
     }
+}
+
+/// Decision 0021: what an agent runs may listen on this computer's loopback address, and be
+/// reached there from outside its sandbox; it reaches nothing itself, not even that.
+#[tokio::test]
+async fn a_server_listens_on_loopback_and_reaches_nothing() {
+    let f = fixture();
+    let port = 40000 + (std::process::id() % 20000) as u16;
+    let job = f.job(&format!("nc -l 127.0.0.1 {port}"), f.profile());
+    let mut p = spawn(job).unwrap();
+    let mut out = p.stdout.take().unwrap();
+    let mut sent = false;
+    for _ in 0..100 {
+        if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+            std::io::Write::write_all(&mut s, b"hello\n").unwrap();
+            sent = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(sent, "it listens");
+    let mut got = vec![0; 6];
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::io::AsyncReadExt::read_exact(&mut out, &mut got),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(got, b"hello\n");
+    p.kill();
+    // Out of it, also to loopback: another's server, or its own.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let theirs = listener.local_addr().unwrap().port();
+    let o = f.sh(&format!("nc -z -w 2 127.0.0.1 {theirs} && echo reached")).await;
+    assert!(!o.out.contains("reached"), "{o:?}");
 }

@@ -27,7 +27,7 @@ async fn an_answer_is_said_and_kept() {
     assert_eq!(r.len(), 1);
     assert_eq!(r[0]["model"], "m");
     assert!(r[0]["messages"][0]["content"].as_str().unwrap().contains("sandbox"));
-    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 10 + usize::from(cfg!(unix)));
     assert!(t.stage.ended().contains(&Outcome::Completed));
     // It goes on from there.
     t.server.add(text(&["Again."]));
@@ -107,7 +107,7 @@ async fn the_same_in_anthropics_form() {
     let r = t.server.requests();
     assert_eq!(r.len(), 3);
     assert!(r[0]["system"].to_string().contains("sandbox"));
-    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 10);
+    assert_eq!(r[0]["tools"].as_array().unwrap().len(), 10 + usize::from(cfg!(unix)));
     let m = r[2]["messages"].as_array().unwrap();
     let roles: Vec<&str> = m.iter().map(|m| m["role"].as_str().unwrap()).collect();
     assert_eq!(roles, ["user", "assistant", "user", "assistant", "user"]);

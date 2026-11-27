@@ -165,6 +165,56 @@ class Asked extends HostStore {
     _shownAgain.clear();
   }
 
+  List<BrowserInfo> pages = const [];
+  @override
+  Future<List<BrowserInfo>> browsers() async => pages;
+  @override
+  Future<void> openBrowser(String session, String agent, int port) =>
+      _do(['open page', session, agent, port], null);
+
+  /// What an agent's page shows now; said anew by [showPage].
+  BrowserView? page;
+  final _pageAgain = <Completer<void>>[];
+  void showPage(BrowserView v) {
+    page = v;
+    for (final c in _pageAgain) {
+      c.complete();
+    }
+    _pageAgain.clear();
+  }
+
+  @override
+  Future<BrowserView> browserView(String session, String agent, int seen) async {
+    while (page == null || page!.version <= seen) {
+      final c = Completer<void>();
+      _pageAgain.add(c);
+      await c.future;
+    }
+    return page!;
+  }
+
+  @override
+  Future<void> holdBrowser(String session, String agent, bool person) =>
+      _do(['hold', agent, person], null);
+  @override
+  Future<void> browserInput(String session, String agent, Json input) =>
+      _do(['page input', input], null);
+  @override
+  Future<void> sizeBrowser(String session, String agent, int width, int height, bool dark) =>
+      _do(['page size', width, height, dark], null);
+  Pointed pointed = const Pointed(
+    'h1#t',
+    'Hello',
+    [('font-size', '32px')],
+    [8, 20, 300, 37],
+    'http://127.0.0.1:5173/',
+  );
+  @override
+  Future<Pointed> pointAt(String session, String agent, double x, double y) =>
+      _do(['point', x.round(), y.round()], pointed);
+  @override
+  Future<void> closeBrowser(String session, String agent) => _do(['close page', agent], null);
+
   List<TerminalInfo> terms = const [];
   Object? closing;
   @override

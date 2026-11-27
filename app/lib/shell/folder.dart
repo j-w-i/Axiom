@@ -56,6 +56,23 @@ class FolderLook extends ChangeNotifier {
       file = null;
       searching = false;
       finding = false;
+      browser = null;
+    }
+    notifyListeners();
+  }
+
+  /// The agent whose browser is shown (decision 0021).
+  String? browser;
+
+  void showBrowser(String? agent) {
+    browser = agent;
+    if (agent != null) {
+      _asked++;
+      path = null;
+      file = null;
+      searching = false;
+      finding = false;
+      terminal = null;
     }
     notifyListeners();
   }
@@ -71,6 +88,7 @@ class FolderLook extends ChangeNotifier {
     loading = true;
     finding = false;
     terminal = null;
+    browser = null;
     final n = ++_asked;
     notifyListeners();
     try {
@@ -985,9 +1003,12 @@ class _HitRow extends StatelessWidget {
 /// What agents of this session have left running: its command, how long, what it said last, and a
 /// way to stop it. Looked at every two seconds while it is shown, and not otherwise.
 class JobsPart extends StatefulWidget {
-  const JobsPart(this.store, this.session, {super.key, this.names = const {}});
+  const JobsPart(this.store, this.session, {super.key, this.names = const {}, this.onBrowse});
   final HostStore store;
   final String session;
+
+  /// Shows an agent's browser.
+  final void Function(String agent)? onBrowse;
 
   /// Agents' names, by id.
   final Map<String, String> names;
@@ -997,6 +1018,10 @@ class JobsPart extends StatefulWidget {
 
 class _JobsPartState extends State<JobsPart> {
   List<JobInfo> _jobs = const [];
+
+  /// Agents' browsers that are open.
+  List<BrowserInfo> _pages = const [];
+  String? _opening;
   Timer? _every;
   final _open = <(String, int)>{};
   final _stopping = <(String, int)>{};
@@ -1039,14 +1064,19 @@ class _JobsPartState extends State<JobsPart> {
   Future<void> _look() async {
     try {
       final all = await widget.store.jobs();
+      final pages = widget.onBrowse == null ? const <BrowserInfo>[] : await widget.store.browsers();
       if (!mounted) return;
       _measure(all);
-      setState(
-        () => _jobs = [
+      setState(() {
+        _jobs = [
           for (final j in all)
             if (j.session == widget.session) j,
-        ],
-      );
+        ];
+        _pages = [
+          for (final b in pages)
+            if (b.session == widget.session) b,
+        ];
+      });
     } on Object {
       // Asked again soon.
     }
@@ -1067,7 +1097,7 @@ class _JobsPartState extends State<JobsPart> {
 
   @override
   Widget build(BuildContext context) {
-    if (_jobs.isEmpty) return const SizedBox.shrink();
+    if (_jobs.isEmpty && _pages.isEmpty) return const SizedBox.shrink();
     final t = Ax.of(context), c = t.colors;
     final running = _jobs.where((j) => j.ended == null).length;
     return PanelGroup(
@@ -1082,12 +1112,53 @@ class _JobsPartState extends State<JobsPart> {
             child: Text(visible(p), style: t.type.small.ink(c.faultText)),
           ),
         for (final j in _jobs) _job(t, j),
+        for (final b in _pages) _page(t, b),
       ],
     );
   }
 
+  Widget _page(AxTheme t, BrowserInfo b) {
+    final c = t.colors, who = widget.names[b.agent];
+    final title = b.title.isNotEmpty ? b.title : b.url;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(AxSpace.card, 2, 8, 6),
+      child: Row(
+        children: [
+          AxGlyph(AxIcon.web, color: c.ink3),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${who == null ? 'A page' : "$who's page"}: ${oneLine(literal(title), 80)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.type.small.ink(c.ink2),
+            ),
+          ),
+          AxButton(
+            label: 'Show',
+            tone: AxTone.quiet,
+            onPressed: () => widget.onBrowse?.call(b.agent),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _browse(String agent, int port) async {
+    setState(() => _opening = '$agent:$port');
+    try {
+      await widget.store.openBrowser(widget.session, agent, port);
+      widget.onBrowse?.call(agent);
+    } on Object catch (e) {
+      if (mounted) setState(() => _problem = wordsOf(e));
+    } finally {
+      if (mounted) setState(() => _opening = null);
+    }
+  }
+
   Widget _job(AxTheme t, JobInfo j) {
     final c = t.colors, key = (j.agent, j.job);
+    final ports = {for (final p in j.processes) ...p.ports}.toList()..sort();
     final open = _open.contains(key);
     final command = oneLine(literal(j.command), 200);
     final who = widget.names[j.agent];
@@ -1135,6 +1206,23 @@ class _JobsPartState extends State<JobsPart> {
               ),
           ],
         ),
+        for (final port in ports)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AxSpace.card, 0, 8, 6),
+            child: Row(
+              children: [
+                AxGlyph(AxIcon.web, color: c.ink3),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Serves 127.0.0.1:$port', style: t.type.small.ink(c.ink2))),
+                if (widget.onBrowse != null && j.ended == null)
+                  AxButton(
+                    label: _opening == '${j.agent}:$port' ? 'Opening…' : 'Open',
+                    tone: AxTone.quiet,
+                    onPressed: _opening != null ? null : () => unawaited(_browse(j.agent, port)),
+                  ),
+              ],
+            ),
+          ),
         if (open)
           for (final p in j.processes)
             Padding(

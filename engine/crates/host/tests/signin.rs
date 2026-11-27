@@ -808,11 +808,20 @@ fn nothing_else_listens() {
                         found.push(format!("{name} {word}"));
                     }
                 }
+                // Nothing opens a socket of the system's own, either.
+                for call in ["libc::socket(", "libc::bind(", "libc::listen("] {
+                    if own.contains(call) {
+                        found.push(format!("{name} {call}"));
+                    }
+                }
             }
         }
     }
     assert!(seen > 50, "{seen}");
-    assert_eq!(found, ["signin.rs TcpListener"]);
+    // `axiom-spawn` reads which of a process's sockets listen (decision 0021): it names their
+    // family, and opens none.
+    found.sort();
+    assert_eq!(found, ["signin.rs TcpListener", "tree.rs AF_INET"]);
     // And that on this machine's own address, which no other machine reaches.
     let own = include_str!("../src/signin.rs");
     assert_eq!(own.matches("TcpListener::bind").count(), 1);

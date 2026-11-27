@@ -5,6 +5,7 @@ import 'package:axiom/host/proto.dart';
 import 'package:axiom/host/session_model.dart';
 import 'package:axiom/patterns/models.dart';
 import 'package:axiom/patterns/transcript_parts.dart';
+import 'package:axiom/shell/browser.dart';
 import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/folder.dart';
 import 'package:axiom/transcript/inline.dart';
@@ -355,7 +356,7 @@ void main() {
             age: 75,
             last: 'ready on :5173\n',
             processes: [
-              ProcessInfo(70, 'npm', cpuMs: 100, memory: 40 << 20),
+              ProcessInfo(70, 'npm', cpuMs: 100, memory: 40 << 20, ports: [5173]),
               ProcessInfo(71, 'node', parent: 1, cpuMs: 900, memory: 300 << 20, orphan: true),
             ],
           ),
@@ -371,13 +372,119 @@ void main() {
       expect(find.text('elsewhere'), findsNothing, reason: 'another session');
       await press(t, find.bySemanticsLabel(RegExp('^npm run dev')));
       expect(find.text('ready on :5173'), findsOneWidget);
+      // What it serves is said, and opened in the agent's browser, never the person's own
+      // (decision 0021).
+      expect(find.text('Serves 127.0.0.1:5173'), findsOneWidget);
       expect(find.text('npm  70'), findsOneWidget);
       expect(find.text('node  71  left behind'), findsOneWidget);
-      expect(find.text('300.0 MiB'), findsOneWidget);
+      expect(find.textContaining(RegExp(r'(^| )300\.0 MiB$')), findsOneWidget);
       await snap(t, 'jobs');
       await press(t, find.text('Stop'));
       expect(s.calls.last, ['stop', 'a', 1]);
       expect(find.text('Stop'), findsNothing, reason: 'only one runs');
+    });
+  });
+
+  group("an agent's page", () {
+    testWidgets('is opened from what its job serves, used, pointed at and sized', (t) async {
+      // A whole picture, three by two, red.
+      const png =
+          'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGP4z8DwH4YZkDkAm34L9XKwuTwAAAAASUVORK5CYII=';
+      BrowserView view(int version, {bool person = false}) => BrowserView(
+        version: version,
+        frame: png,
+        width: 1280,
+        height: 800,
+        url: 'http://127.0.0.1:5173/',
+        title: 'App',
+        person: person,
+        refused: const ['https://example.com/a.png'],
+      );
+      final s = Asked()
+        ..running = const [
+          JobInfo(
+            's',
+            'a',
+            1,
+            'npm run dev',
+            age: 5,
+            last: '',
+            processes: [
+              ProcessInfo(70, 'npm', ports: [5173]),
+            ],
+          ),
+        ];
+      await shell(t, s);
+      await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')).first);
+      await settled(t);
+      if (!Browsers.made) {
+        // No browser on Windows yet: nothing offers one.
+        expect(find.text('Serves 127.0.0.1:5173'), findsOneWidget);
+        expect(find.text('Open'), findsNothing);
+        return;
+      }
+      await press(t, find.text('Open'));
+      expect(s.calls.last, ['open page', 's', 'a', 5173]);
+      s.showPage(view(1));
+      await settled(t);
+      final page = find.bySemanticsLabel('The page App');
+      expect(page, findsOneWidget);
+      expect(find.text('App'), findsOneWidget);
+      // What the page asked for elsewhere, refused.
+      await press(t, find.text('Refused 1 address'));
+      expect(find.text('https://example.com/a.png'), findsOneWidget);
+
+      // Nothing of the person's reaches the page until they take it.
+      // A point of the picture, all of it: what can be seen of it may be less, and it moves.
+      Offset at() {
+        final r = t.getRect(
+          find.descendant(of: find.byType(AgentPage), matching: find.byType(Image)),
+        );
+        return r.topLeft + Offset(r.width / 2, r.height / 4);
+      }
+
+      await t.tapAt(at());
+      await settled(t);
+      expect(s.calls.where((c) => c.first == 'page input'), isEmpty);
+      await press(t, find.text('Use it'));
+      expect(s.calls.last, ['hold', 'a', true]);
+      expect(find.text('The agent waits while you use the page.'), findsOneWidget);
+      s.showPage(view(2, person: true));
+      await settled(t);
+      expect(find.text('Give back'), findsOneWidget);
+      await t.tapAt(at());
+      await settled(t);
+      // Where it was pressed, on the page's own scale.
+      final down = s.calls.firstWhere((c) => c.first == 'page input')[1]! as Json;
+      expect([down['kind'], down['event'], down['button']], ['mouse', 'pressed', 'left']);
+      expect([(down['x']! as double).round(), (down['y']! as double).round()], [640, 200]);
+
+      // Pointed at: what it is goes into the message, as the page's.
+      await press(t, find.text('Point'));
+      expect(find.text('Press what you mean on the page.'), findsOneWidget);
+      await t.tapAt(at());
+      await settled(t);
+      expect(s.calls.last, ['point', 640, 200]);
+      expect(find.text('Added to your message.'), findsOneWidget);
+      final message = find.byWidgetPredicate(
+        (w) => w is EditableText && w.controller.text.contains('h1#t'),
+      );
+      expect(message, findsOneWidget);
+      final said = t.widget<EditableText>(message).controller.text;
+      expect(said, contains("what it says is the page's"));
+      expect(said, contains('font-size: 32px'));
+
+      await press(t, find.text('Phone'));
+      expect(s.calls.last, ['page size', 390, 844, false]);
+      await press(t, find.text('Dark'));
+      expect(s.calls.last, ['page size', 1280, 800, true]);
+      await snap(t, 'agents-page');
+
+      // Closed: it ends, and what the person held goes back.
+      await press(t, find.bySemanticsLabel('Close the browser'));
+      expect(s.calls, anyElement(equals(['close page', 'a'])));
+      expect(s.calls.last, ['hold', 'a', false]);
+      expect(page, findsNothing);
     });
   });
 
