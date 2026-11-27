@@ -15,6 +15,7 @@ mod delegated;
 mod editor;
 mod faults;
 mod files;
+mod folders;
 mod limits;
 mod log;
 pub mod mcp;

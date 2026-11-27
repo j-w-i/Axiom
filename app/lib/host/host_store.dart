@@ -168,6 +168,7 @@ class HostStore extends ChangeNotifier {
     // Nothing that is shown depends on it.
     unawaited(loadConnections().catchError((_) {}));
     unawaited(loadHarnesses().catchError((_) {}));
+    unawaited(loadFolders().catchError((_) {}));
     unawaited(loadLists().catchError((_) {}));
     unawaited(loadNeeds());
     if (current case final c? when c.fault == null) await _follow(c);
@@ -304,6 +305,29 @@ class HostStore extends ChangeNotifier {
     final r = await _live.call('connection.list');
     connections = [for (final j in r! as List<Object?>) Connection.decode(j! as Json)];
     notifyListeners();
+  }
+
+  /// Folders as their person has named and set them up.
+  List<FolderInfo> folders = const [];
+
+  Future<void> loadFolders() async {
+    final r = await _live.call('folder.list');
+    folders = [for (final j in r! as List<Object?>) FolderInfo.decode(j! as Json)];
+    notifyListeners();
+  }
+
+  /// What is kept of the folder at [path], as long as it is that folder still.
+  FolderInfo? folderAt(String path) => folders.where((f) => f.path == path && !f.moved).firstOrNull;
+
+  /// Says all that is kept of a folder.
+  Future<void> setFolder(FolderInfo f) async {
+    await _live.call('folder.set', f.encode());
+    await loadFolders();
+  }
+
+  Future<void> forgetFolder(String id) async {
+    await _live.call('folder.remove', {'id': id});
+    await loadFolders();
   }
 
   /// What the host can run agents with beside itself; found without running any of it.

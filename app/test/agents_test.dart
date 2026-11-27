@@ -91,7 +91,7 @@ class Asked extends HostStore {
 
   /// What a folder holds, as M4's calls answer: by path.
   Map<String, FileText> texts = const {};
-  Map<String, FileList> folders = const {};
+  Map<String, FileList> dirs = const {};
   List<String> fits = const [];
   FoundLines found = const FoundLines([]);
   List<JobInfo> running = const [];
@@ -103,7 +103,7 @@ class Asked extends HostStore {
   ], texts[path] ?? (throw const Failed(1, 'not_found', 'no such file')));
   @override
   Future<FileList> listFiles(String session, String path, {String? agent}) =>
-      _do(['list', path], folders[path] ?? FileList(path, const []));
+      _do(['list', path], dirs[path] ?? FileList(path, const []));
   @override
   Future<List<String>> findFiles(String session, String words, {String? agent}) =>
       _do(['find', words], fits);
@@ -121,6 +121,30 @@ class Asked extends HostStore {
       _do(['edit', path, line], null);
   @override
   Future<void> showFile(String session, String path, {String? agent}) => _do(['show', path], null);
+  @override
+  Future<void> setFolder(FolderInfo f) async {
+    await _do(['folder', f.path, f.name, f.pinned, f.execution?.model, f.access], null);
+    this.folders = [
+      ...this.folders.where((x) => x.path != f.path),
+      FolderInfo(
+        'f_${f.path}',
+        f.path,
+        name: f.name,
+        pinned: f.pinned,
+        execution: f.execution,
+        access: f.access,
+      ),
+    ];
+    notifyListeners();
+  }
+
+  @override
+  Future<void> forgetFolder(String id) async {
+    await _do(['forget folder', id], null);
+    this.folders = [...this.folders.where((x) => x.id != id)];
+    notifyListeners();
+  }
+
   // Asked again and again while shown: not among the calls.
   @override
   Future<List<JobInfo>> jobs() async => running;

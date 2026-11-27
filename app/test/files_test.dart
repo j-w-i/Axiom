@@ -327,7 +327,7 @@ void main() {
       expect(find.textContaining('line 300 forget()', findRichText: true), findsOneWidget);
       // The folder's own files, folder by folder.
       await press(t, find.bySemanticsLabel('Close lib/cache.dart'));
-      s.folders = {
+      s.dirs = {
         '': const FileList('', [FileEntry('lib', folder: true), FileEntry('README.md')]),
         'lib': const FileList('lib', [FileEntry('cache.dart')]),
       };
@@ -345,7 +345,18 @@ void main() {
     testWidgets('are listed with what they said last, and stopped', (t) async {
       final s = Asked()
         ..running = const [
-          JobInfo('s', 'a', 1, 'npm run dev', age: 75, last: 'ready on :5173\n'),
+          JobInfo(
+            's',
+            'a',
+            1,
+            'npm run dev',
+            age: 75,
+            last: 'ready on :5173\n',
+            processes: [
+              ProcessInfo(70, 'npm', cpuMs: 100, memory: 40 << 20),
+              ProcessInfo(71, 'node', parent: 1, cpuMs: 900, memory: 300 << 20, orphan: true),
+            ],
+          ),
           JobInfo('s', 'a', 2, 'cargo build', age: 9, ended: 'ended: exit 0', last: 'done'),
           JobInfo('other', 'b', 1, 'elsewhere', last: ''),
         ];
@@ -358,10 +369,78 @@ void main() {
       expect(find.text('elsewhere'), findsNothing, reason: 'another session');
       await press(t, find.bySemanticsLabel(RegExp('^npm run dev')));
       expect(find.text('ready on :5173'), findsOneWidget);
+      expect(find.text('npm  70'), findsOneWidget);
+      expect(find.text('node  71  left behind'), findsOneWidget);
+      expect(find.text('300.0 MiB'), findsOneWidget);
       await snap(t, 'jobs');
       await press(t, find.text('Stop'));
       expect(s.calls.last, ['stop', 'a', 1]);
       expect(find.text('Stop'), findsNothing, reason: 'only one runs');
+    });
+  });
+
+  group('folders, as their person names them', () {
+    testWidgets('renamed, pinned, and new sessions there begin as one of them did', (t) async {
+      final s = Asked();
+      await shell(t, s);
+      expect(find.text('w'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Settings of w'));
+      await press(t, find.text('Rename…'));
+      await t.enterText(field('Name of the folder'), 'Web shop');
+      await t.testTextInput.receiveAction(TextInputAction.done);
+      await settled(t);
+      expect(s.calls.last, ['folder', '/w', 'Web shop', false, null, null]);
+      expect(find.text('Web shop'), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Settings of Web shop'));
+      await press(t, find.text('Pin to the top'));
+      expect(s.calls.last, ['folder', '/w', 'Web shop', true, null, null]);
+      await press(t, find.bySemanticsLabel('Settings of Web shop'));
+      expect(find.text('Unpin'), findsOneWidget);
+      await press(t, find.text('Begin new sessions like this one'));
+      expect(s.calls.last, ['folder', '/w', 'Web shop', true, 'claude-opus-5-5', Access.ask]);
+      // Another way to begin is chosen, and a new session there begins as the folder says.
+      s.folders = [
+        FolderInfo(
+          'f_1',
+          '/w',
+          name: 'Web shop',
+          execution: const Execution(harness: 'axiom', model: 'gpt-5.6', connection: 'c1'),
+          access: Access.read,
+        ),
+      ];
+      await press(t, find.bySemanticsLabel('New session in Web shop'));
+      expect(find.text('GPT-5.6'), findsWidgets);
+      expect(find.text('Read only'), findsWidgets);
+      await press(t, find.bySemanticsLabel('Settings of Web shop'));
+      await press(t, find.text('Forget this folder\'s settings'));
+      expect(s.calls.last, ['forget folder', 'f_1']);
+      expect(find.text('Web shop'), findsNothing);
+      expect(find.text('w'), findsWidgets);
+    });
+
+    testWidgets('a pinned folder stands first', (t) async {
+      SessionInfo info(String id, String w, int at) => SessionInfo.decode({
+        'id': id,
+        'title': 'In $w',
+        'workspace': w,
+        'created': at,
+        'updated': at,
+        'last_seq': 1,
+        'running': false,
+      });
+      final s = Asked()
+        ..sessions = [info('s2', '/new', 2), info('s1', '/old', 1)]
+        ..folders = const [FolderInfo('f_1', '/old', pinned: true)];
+      await shell(t, s);
+      double y(String text) => t.getTopLeft(find.text(text).first).dy;
+      expect(y('old'), lessThan(y('new')));
+    });
+
+    testWidgets('one that another folder took the place of is not used', (t) async {
+      final s = Asked()..folders = const [FolderInfo('f_1', '/w', name: 'Old', moved: true)];
+      await shell(t, s);
+      expect(find.text('Old'), findsNothing);
+      expect(find.text('w'), findsOneWidget);
     });
   });
 }

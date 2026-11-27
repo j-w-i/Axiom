@@ -319,8 +319,12 @@ class StartDraft extends ChangeNotifier {
     if (!(info?.speeds.contains(speed) ?? false)) speed = '';
   }
 
+  /// A person has chosen what it runs with in this draft: no folder's settings change it any more.
+  bool _picked = false;
+
   /// Chooses one of those that are offered.
   void choose(Offer o) => change(() {
+    _picked = true;
     if (o.harness != harness) {
       harness = o.harness;
       trust = false;
@@ -347,6 +351,7 @@ class StartDraft extends ChangeNotifier {
       harness == 'axiom' ? null : store.harnesses.where((h) => h.id == harness).firstOrNull;
 
   void runWith(String id) => change(() {
+    _picked = true;
     harness = id;
     problem = null;
     trust = false;
@@ -434,6 +439,7 @@ class StartDraft extends ChangeNotifier {
       open = null;
     }
     if (path.isEmpty) return;
+    if (store.folderAt(path) case final f? when !_picked) change(() => _begin(f));
     _soon = Timer(const Duration(milliseconds: 400), () async {
       try {
         final w = await store.look(path);
@@ -442,6 +448,29 @@ class StartDraft extends ChangeNotifier {
         // Not a folder yet; starting says so.
       }
     });
+  }
+
+  /// Begins as its person said sessions in this folder begin, as far as that can be had now.
+  void _begin(FolderInfo f) {
+    if (f.access case final a? when a != Access.unknown) access = a;
+    final x = f.execution;
+    if (x == null) {
+      fit();
+      return;
+    }
+    if (x.harness == 'axiom') {
+      if (!store.own.any((c) => c.id == x.connection)) return fit();
+      harness = 'axiom';
+      connection = x.connection;
+    } else {
+      if (!store.harnesses.any((h) => h.id == x.harness && h.program != null)) return fit();
+      harness = x.harness;
+      account = store.accountsOf(harness).any((c) => c.id == x.connection) ? x.connection : null;
+    }
+    model.text = x.model ?? '';
+    effort = x.effort ?? '';
+    fit();
+    fitModel();
   }
 
   /// Asks for the models of the chosen connection, once.

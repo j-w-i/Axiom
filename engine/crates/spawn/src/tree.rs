@@ -32,6 +32,24 @@ pub struct Tree {
     done: bool,
 }
 
+/// What one process uses, as the system says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Usage {
+    pub pid: u32,
+    pub parent: u32,
+    /// Its program's name, as the system has it (cut short by it).
+    pub name: String,
+    /// Processor time it has used, in all, in milliseconds.
+    pub cpu_ms: u64,
+    /// Memory it holds now, in bytes.
+    pub memory: u64,
+}
+
+/// What `pid` uses, if it runs.
+pub fn usage(pid: u32) -> Option<Usage> {
+    sys::usage(i32::try_from(pid).ok()?)
+}
+
 /// Makes what `c` starts a session of its own, with the mark, `filter` if there is one, and no other
 /// open file.
 #[allow(unsafe_code)]
@@ -131,6 +149,18 @@ impl Tree {
                 }
             }
         }
+    }
+
+    /// Those known that still run, the first one first.
+    pub fn members(&self) -> Vec<u32> {
+        let mut all: Vec<u32> = self
+            .known
+            .iter()
+            .filter(|(p, at)| sys::started(**p) == Some(**at))
+            .filter_map(|(p, _)| u32::try_from(*p).ok())
+            .collect();
+        all.sort_by_key(|p| *p != u32::try_from(self.root).unwrap_or(0));
+        all
     }
 
     /// Asks all of it to end.
@@ -250,6 +280,44 @@ mod sys {
         info(pid).map(|i| i.pbi_start_tvsec * 1_000_000 + i.pbi_start_tvusec)
     }
 
+    /// How long the machine's own unit of time is, in nanoseconds: `numer / denom`.
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+
+    pub fn usage(pid: i32) -> Option<super::Usage> {
+        let size = i32::try_from(size_of::<libc::proc_taskallinfo>()).ok()?;
+        // SAFETY: the buffers are as large as said; zeroed, all of them are valid.
+        let (a, base) = unsafe {
+            let mut a: libc::proc_taskallinfo = zeroed();
+            let n =
+                libc::proc_pidinfo(pid, libc::PROC_PIDTASKALLINFO, 0, (&raw mut a).cast(), size);
+            let mut base = Timebase { numer: 1, denom: 1 };
+            mach_timebase_info(&raw mut base);
+            if n != size || a.pbsd.pbi_status == libc::SZOMB {
+                return None;
+            }
+            (a, base)
+        };
+        // Processor time is in the machine's own units.
+        let ticks = u128::from(a.ptinfo.pti_total_user + a.ptinfo.pti_total_system);
+        let ns = ticks * u128::from(base.numer.max(1)) / u128::from(base.denom.max(1));
+        let name: Vec<u8> =
+            a.pbsd.pbi_comm.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        Some(super::Usage {
+            pid: u32::try_from(pid).ok()?,
+            parent: a.pbsd.pbi_ppid,
+            name: String::from_utf8_lossy(&name).into_owned(),
+            cpu_ms: u64::try_from(ns / 1_000_000).unwrap_or(u64::MAX),
+            memory: a.ptinfo.pti_resident_size,
+        })
+    }
+
     fn list(call: impl Fn(*mut libc::c_void, i32) -> i32) -> Vec<i32> {
         let mut v = vec![0i32; 4096];
         let bytes = i32::try_from(v.len() * size_of::<i32>()).unwrap_or(0);
@@ -321,6 +389,33 @@ mod sys {
         stat(pid).filter(|s| !matches!(s.0, 'Z' | 'X')).map(|s| s.2)
     }
 
+    #[allow(unsafe_code)]
+    pub fn usage(pid: i32) -> Option<super::Usage> {
+        let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let (head, rest) = s.rsplit_once(')')?;
+        let name = head.split_once('(')?.1.to_owned();
+        let f: Vec<&str> = rest.split_ascii_whitespace().collect();
+        if matches!(f.first()?.chars().next()?, 'Z' | 'X') {
+            return None;
+        }
+        // From the state: parent, then user and system time at 11 and 12, the resident pages at 21.
+        let parent = f.get(1)?.parse().ok()?;
+        let ticks: u64 = f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?;
+        let pages: u64 = f.get(21)?.parse().ok()?;
+        // SAFETY: plain system calls.
+        let (hz, page) =
+            unsafe { (libc::sysconf(libc::_SC_CLK_TCK), libc::sysconf(libc::_SC_PAGESIZE)) };
+        let hz = u64::try_from(hz).ok().filter(|h| *h > 0)?;
+        let page = u64::try_from(page).ok()?;
+        Some(super::Usage {
+            pid: u32::try_from(pid).ok()?,
+            parent,
+            name,
+            cpu_ms: ticks.saturating_mul(1000) / hz,
+            memory: pages.saturating_mul(page),
+        })
+    }
+
     /// This user's processes that hold the other end of the mark.
     pub fn holding(mark: &std::os::unix::io::OwnedFd) -> Vec<i32> {
         use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
@@ -361,6 +456,34 @@ mod sys {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_a_process_uses_is_said() {
+        let mut busy = std::process::Command::new("/bin/sh")
+            .args(["-c", "i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done; sleep 63"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = busy.id();
+        let mut u = usage(pid).unwrap();
+        for _ in 0..200 {
+            if u.cpu_ms > 50 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            u = usage(pid).unwrap();
+        }
+        assert_eq!((u.pid, u.parent), (pid, std::process::id()));
+        assert!(["sh", "bash", "dash"].contains(&u.name.as_str()), "{u:?}");
+        assert!(u.cpu_ms > 50 && u.cpu_ms < 60_000, "{u:?}");
+        assert!(u.memory > 64 * 1024 && u.memory < 1 << 30, "{u:?}");
+        let t = Tree::new(pid, None);
+        assert_eq!(t.members(), [pid]);
+        busy.kill().unwrap();
+        busy.wait().unwrap();
+        assert!(usage(pid).is_none());
+        assert!(t.members().is_empty());
+    }
 
     /// A number that is somebody else's by now: neither it nor its children are ended.
     #[test]

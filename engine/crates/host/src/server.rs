@@ -144,6 +144,7 @@ struct State {
     open: watch::Sender<String>,
     agents: Arc<Agents>,
     signins: Arc<Signins>,
+    folders: crate::folders::Folders,
 }
 
 type Slot = tokio::sync::Mutex<Option<Opened>>;
@@ -333,6 +334,7 @@ impl Host {
             changed: Notify::new(),
             over: watch::Sender::new(false),
             open: watch::Sender::new(String::new()),
+            folders: crate::folders::Folders::open(&p.data.join("folders.json"))?,
             cfg,
         });
         let switch: std::sync::Weak<dyn Switch> = Arc::downgrade(&st) as _;
@@ -1116,6 +1118,39 @@ async fn looked_at(
         .await
         .map_err(|e| internal(e.to_string()))??;
     Ok(files::Here { site })
+}
+
+/// Whether a process of a tree has lost its parent: it is not the first, and its parent is none of
+/// the tree.
+#[cfg(unix)]
+fn left(pid: u32, parent: u32, root: Option<u32>, pids: &[u32]) -> bool {
+    Some(pid) != root && !pids.contains(&parent)
+}
+
+/// What each process of a tree uses. One whose parent is not in the tree and is not who started it
+/// has lost its parent.
+fn processes(pids: &[u32]) -> Vec<ProcessInfo> {
+    #[cfg(unix)]
+    {
+        let all: Vec<axiom_spawn::Usage> =
+            pids.iter().filter_map(|p| axiom_spawn::usage(*p)).collect();
+        let root = pids.first().copied();
+        all.iter()
+            .map(|u| ProcessInfo {
+                pid: u.pid,
+                parent: u.parent,
+                name: u.name.clone(),
+                cpu_ms: u.cpu_ms,
+                memory: u.memory,
+                orphan: left(u.pid, u.parent, root, pids),
+            })
+            .collect()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pids;
+        Vec::new()
+    }
 }
 
 /// Done off the runtime's threads.
@@ -2117,6 +2152,21 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             let w = st.agents.editors(written)?;
             value(off(move || Ok(w.editors())).await?)
         }
+        Call::Folders {} => value(st.folders.list()),
+        Call::FolderSet { path, name, pinned, execution, access, commands } => {
+            // As sessions name it, so that it is theirs; what it is, is checked by the system.
+            if !std::path::Path::new(&path).is_absolute()
+                || limits::text_len(&path) > limits::WORKSPACE
+            {
+                return Err(agents::bad("a folder is named by its whole path"));
+            }
+            let said = crate::folders::Said { path, name, pinned, execution, access, commands };
+            value(st.folders.set(said)?)
+        }
+        Call::FolderRemove { id } => {
+            st.folders.remove(&id)?;
+            Ok(json!({}))
+        }
         Call::Jobs {} => {
             let mut all = Vec::new();
             for (session, agent, jobs) in st.agents.jobs() {
@@ -2129,6 +2179,7 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
                         age: j.age,
                         ended: j.ended,
                         last: j.last,
+                        processes: processes(&j.processes),
                     });
                 }
             }
@@ -2160,6 +2211,18 @@ async fn handle(st: &Arc<State>, call: Call) -> Result<Value, WireError> {
             }
             _ => Err(WireError::new(ErrorCode::NotFound, "no such run in this session")),
         },
+    }
+}
+
+#[cfg(all(test, unix))]
+mod left_behind {
+    #[test]
+    fn a_process_whose_parent_is_gone_was_left_behind() {
+        let tree = [10, 11, 12];
+        assert!(!super::left(10, 1, Some(10), &tree), "the first is started by the host");
+        assert!(!super::left(11, 10, Some(10), &tree));
+        assert!(super::left(12, 1, Some(10), &tree));
+        assert!(super::left(12, 99, Some(10), &tree));
     }
 }
 
