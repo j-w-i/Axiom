@@ -90,6 +90,13 @@ Folders (`m4/folders`, stacked on `m4/files`):
 - W-38, as far as jobs go: each job's processes with processor share, memory, and those left behind (`axiom-spawn` reads `proc_pidinfo` on macOS and `/proc` on Linux; nothing on Windows). What a shell command or a delegated program runs is not listed yet.
 - W-37: commands are kept with the folder; running them waits for terminals.
 Verified on macOS 27 arm64: 58 Rust suites (876 tests), 500 app tests, offscreen; clippy for Linux of `axiom-spawn`. Breakages: 7 more, all caught after one test was added (pinned folders first).
+Terminals (`m4/terminals`, stacked on `m4/folders`; decision 0022):
+- W-48: a person's own terminals in the panel, their login shell (from `SHELL` if it is the system's, otherwise `/bin/sh`) outside the sandbox as their own act, on a pseudo-terminal `axiom-spawn` makes. The host keeps each screen with `vt100` (5 000 lines back) and sends rows of text and colours; the client draws them, takes keys, pastes (marked where the program asks, asked about first where it does not and the text has lines), scrolls. Several, one shown at a time, none split; kept while the host runs, so a window that comes back finds them; one where something runs is closed only with a second word; named by what a program says or what runs in front. Not on Windows. Sign-in for programs: a person types it in one; no key starts it for them yet.
+- W-47: selected output goes into the message, marked as the terminal's output.
+- W-19 in terminals: a path pressed in one opens the reader.
+- W-37: a folder's commands (name and what is typed, at most nine) are set from its menu in the list, shown in the panel, and run each in a new terminal by a press or by ⌥⌘1–9 (Ctrl+Alt elsewhere).
+- W-49 is not built: it needs decision 0021's sandbox change, with the browser.
+Verified on macOS 27 arm64: 59 Rust suites (880 tests), 503 app tests; Linux clippy of `axiom-spawn`. Breakages: 8 tried, 5 caught at once, two more after the tests were made stronger; one survives: without `TIOCSCTTY` the tests still pass, because Control-C typed into a terminal has not been seen to interrupt anything in the session that built this, also with Python's own `pty` (K57).
 Verified for folders and files on macOS 27 arm64: 58 Rust suites (870 tests), 497 app tests, offscreen. Deliberate breakages: 11 in the host and tools (one survives: `..` in a path, which `Place` refuses before), 7 in the client, all caught after two tests were made stronger.
 
 ## The look, round 12 (`design/flat`)
@@ -107,7 +114,7 @@ Built on the owner's word (2026-11-25). In the pictures and not in the app, beca
 3. Owner: drag the window by its header and try full screen (K8).
 4. Owner: say whether the real Claude Code or Codex on this computer may be started once (K40); sign in with ChatGPT once, if wanted (K47).
 5. Somebody with the standing to do it: the security review (K32). It should see seccomp, branching's `points`, Bedrock, and now 0016: what a person may have a program given.
-6. M4's worth-building items left: W-36 to W-38, W-42 to W-52 (decisions 0018 to 0021 are written); then M5, which begins with taking back what was said.
+6. M4's worth-building items left: W-38 beyond jobs, W-42 to W-46 (git), W-49 to W-52 (an agent's own server and the browser); then the owner's switch away from Axiom's own loop, then M5, which begins with taking back what was said.
 
 ## The owner's next direction (2026-11-26)
 After M4, Axiom stops being a harness: models that no harness provides run on DeepSeek Harness (dsh, headless), and Axiom gives every agent tools for its own features. Storage used well, little downloaded. Not begun; first the owner wants a report on how T3 Code does it (agent loop, browser, simulators), and what becomes of Axiom's own loop is not decided.

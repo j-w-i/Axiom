@@ -123,7 +123,7 @@ impl Where {
             .collect()
     }
 
-    fn env(&self) -> Result<Env, WireError> {
+    pub fn env(&self) -> Result<Env, WireError> {
         let user = ["USER", "LOGNAME", "USERNAME"]
             .iter()
             .filter_map(|v| std::env::var(v).ok())

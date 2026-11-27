@@ -123,7 +123,15 @@ class Asked extends HostStore {
   Future<void> showFile(String session, String path, {String? agent}) => _do(['show', path], null);
   @override
   Future<void> setFolder(FolderInfo f) async {
-    await _do(['folder', f.path, f.name, f.pinned, f.execution?.model, f.access], null);
+    await _do([
+      'folder',
+      f.path,
+      f.name,
+      f.pinned,
+      f.execution?.model,
+      f.access,
+      for (final c in f.commands) '${c.key}: ${c.name} = ${c.command}',
+    ], null);
     this.folders = [
       ...this.folders.where((x) => x.path != f.path),
       FolderInfo(
@@ -133,6 +141,7 @@ class Asked extends HostStore {
         pinned: f.pinned,
         execution: f.execution,
         access: f.access,
+        commands: f.commands,
       ),
     ];
     notifyListeners();
@@ -143,6 +152,46 @@ class Asked extends HostStore {
     await _do(['forget folder', id], null);
     this.folders = [...this.folders.where((x) => x.id != id)];
     notifyListeners();
+  }
+
+  /// A terminal's screen as it is now; a call for a later one waits until it is set.
+  Screen? shown;
+  final _shownAgain = <Completer<void>>[];
+  void show(Screen s) {
+    shown = s;
+    for (final c in _shownAgain) {
+      c.complete();
+    }
+    _shownAgain.clear();
+  }
+
+  List<TerminalInfo> terms = const [];
+  Object? closing;
+  @override
+  Future<String> openTerminal(String session, int cols, int rows, {String? command}) =>
+      _do(['terminal', session, ?command], 't_1');
+  @override
+  Future<List<TerminalInfo>> terminals() async => terms;
+  @override
+  Future<Screen> screen(String terminal, int seen) async {
+    while (shown == null || shown!.version <= seen) {
+      final c = Completer<void>();
+      _shownAgain.add(c);
+      await c.future;
+    }
+    return shown!;
+  }
+
+  @override
+  Future<void> typeInto(String terminal, String text) => _do(['type', text], null);
+  @override
+  Future<void> resizeTerminal(String terminal, int cols, int rows) async {}
+  @override
+  Future<void> scrollTerminal(String terminal, int back) => _do(['scroll', back], null);
+  @override
+  Future<void> closeTerminal(String terminal, {bool force = false}) async {
+    calls.add(['close', terminal, force]);
+    if (closing case final e? when !force) throw e;
   }
 
   // Asked again and again while shown: not among the calls.

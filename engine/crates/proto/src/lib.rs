@@ -754,6 +754,66 @@ pub struct FolderCommand {
     pub key: Option<u8>,
 }
 
+/// A person's own terminal (decision 0022).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalInfo {
+    pub terminal: String,
+    pub session: SessionId,
+    /// What it is called: what a program in it said, or what runs in it.
+    pub title: String,
+    /// Something other than its shell runs in front.
+    #[serde(default, skip_serializing_if = "not")]
+    pub busy: bool,
+    /// How it ended; absent while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+}
+
+/// What a terminal shows, as its emulator in the host keeps it: text and colours, nothing a program
+/// wrote as such (T42).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Screen {
+    pub terminal: String,
+    /// Higher each time it changes.
+    pub version: u64,
+    pub cols: u16,
+    pub rows: Vec<Vec<Span>>,
+    /// Row and column, from 0; absent while it is hidden or scrolled away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<(u16, u16)>,
+    pub title: String,
+    /// Lines scrolled back from the end, and how many there are to scroll back through.
+    #[serde(default)]
+    pub back: u32,
+    #[serde(default)]
+    pub most_back: u32,
+    /// The program in it wants arrow keys as an application does, and pasted text marked.
+    #[serde(default, skip_serializing_if = "not")]
+    pub app_cursor: bool,
+    #[serde(default, skip_serializing_if = "not")]
+    pub bracketed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+}
+
+/// Text of one look.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Span {
+    pub text: String,
+    /// `0`..`255`, or `#rrggbb`; absent: the terminal's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+    /// Bold 1, dim 2, italic 4, underlined 8, inverse 16.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub style: u8,
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+
 /// A harness, as it was found without being run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessInfo {
@@ -1193,6 +1253,41 @@ pub enum Call {
     /// Forgets what is kept of a folder. Its sessions stay.
     #[serde(rename = "folder.remove")]
     FolderRemove { id: String },
+    /// Opens a terminal of the person's own in a session's folder (decision 0022); `command` is typed
+    /// into it, as a folder's command. Answers with its id.
+    #[serde(rename = "terminal.open")]
+    TerminalOpen {
+        session: SessionId,
+        cols: u16,
+        rows: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+    },
+    /// The terminals there are: an array of [`TerminalInfo`].
+    #[serde(rename = "terminal.list")]
+    Terminals {},
+    /// Its screen, once its version is past `seen`, or as it is after a while. A [`Screen`].
+    #[serde(rename = "terminal.screen")]
+    TerminalScreen {
+        terminal: String,
+        #[serde(default)]
+        seen: u64,
+    },
+    /// What the person typed or pasted, as a terminal is sent it.
+    #[serde(rename = "terminal.input")]
+    TerminalInput { terminal: String, text: String },
+    #[serde(rename = "terminal.resize")]
+    TerminalResize { terminal: String, cols: u16, rows: u16 },
+    /// Shows it so many lines back from the end; 0: the end.
+    #[serde(rename = "terminal.scroll")]
+    TerminalScroll { terminal: String, back: u32 },
+    /// Ends it and all it runs. While something runs in front, only with `force`.
+    #[serde(rename = "terminal.close")]
+    TerminalClose {
+        terminal: String,
+        #[serde(default, skip_serializing_if = "not")]
+        force: bool,
+    },
     /// The record of what was done, after `after`.
     #[serde(rename = "audit.read")]
     Audit {

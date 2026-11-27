@@ -15,4 +15,6 @@
 {"id":12,"result":[{"age":30,"agent":"a_1","command":"npm run dev","ended":"ended: exit 1","job":2,"last":"ready\n","processes":[{"cpu_ms":1500,"memory":4096,"name":"node","orphan":true,"parent":1,"pid":41}],"session":"s_1"}]}
 {"id":13,"result":[{"id":"zed","name":"Zed","path":"/usr/local/bin/zed"}]}
 {"id":14,"result":[{"access":"read","commands":[{"command":"npm run dev","icon":"play","key":1,"name":"Dev"}],"execution":{"connection":"c_2","harness":"axiom","model":"m"},"id":"f_1","moved":true,"name":"Web","path":"/w","pinned":true}]}
+{"id":15,"result":[{"busy":true,"ended":"ended: exit 0","session":"s_1","terminal":"t_1","title":"vim"}]}
+{"id":16,"result":{"app_cursor":true,"back":3,"bracketed":true,"cols":80,"cursor":[0,5],"most_back":40,"rows":[[{"text":"$ "},{"bg":"#102030","fg":"1","style":17,"text":"red"}],[]],"terminal":"t_1","title":"T","version":7}}
 {"open":"/w"}

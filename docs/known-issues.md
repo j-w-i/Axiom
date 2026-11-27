@@ -52,3 +52,4 @@
 | K38 | macOS: a build that is not signed is another program to the keychain each time it is made, so its keys have to be added again. It never asks | signed builds, M7 |
 | K39 | A folder below one that is protected by name (`.claude/worktrees/x`, say) cannot be a workspace an agent writes to | M5, Axiom's own worktrees |
 | K56 | Pictures of a folder are shown in the panel's reader only: not in the transcript, and they cannot be saved or copied from Axiom (an image on the clipboard needs a plugin); Show in Finder hands them over | M4 |
+| K57 | Control-C typed into a terminal has not been seen to interrupt a program: not in the tests here, and not with Python's own `pty` in the same session, while a signal sent directly does. The terminal is made the shell's own (`TIOCSCTTY`) and its signals are reset; a real window has not been tried | the owner, with a window |

@@ -82,6 +82,8 @@ pub enum PersonsOwn {
     Reveal,
     /// Git talks to a remote with their credentials (0018).
     Remote,
+    /// Their own shell, in a terminal of theirs (0022).
+    Terminal,
 }
 
 impl Unsandboxed {

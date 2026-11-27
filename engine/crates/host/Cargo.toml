@@ -36,6 +36,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
+# A person's terminals are kept as screens in the host, so that no program's bytes reach the client
+# (decision 0022, T42). MIT.
+vt100 = "0.18"
 
 # One constant (O_NONBLOCK); tokio and getrandom have the crate in the tree anyway.
 [target.'cfg(unix)'.dependencies]

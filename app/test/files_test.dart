@@ -9,6 +9,8 @@ import 'package:axiom/shell/changes.dart';
 import 'package:axiom/shell/folder.dart';
 import 'package:axiom/transcript/inline.dart';
 import 'package:axiom/shell/shell.dart';
+import 'package:axiom/shell/terminal.dart';
+import 'package:axiom/ui/tokens.dart';
 import 'package:axiom/ui/controls.dart';
 import 'package:axiom/ui/prefs.dart';
 import 'package:flutter/services.dart';
@@ -441,6 +443,153 @@ void main() {
       await shell(t, s);
       expect(find.text('Old'), findsNothing);
       expect(find.text('w'), findsOneWidget);
+    });
+  });
+
+  group('terminals of the person\'s own', () {
+    test('keys and pastes as a terminal takes them, and paths in it', () {
+      expect(pasted('a\nb', bracketed: false), 'a\rb');
+      expect(pasted('a\r\nb\x1b[201~c', bracketed: true), '\x1b[200~a\rbc\x1b[201~');
+      expect(pathAt('error at src/a.rs:42:7.', 12), ('src/a.rs', 42));
+      expect(pathAt('see (lib/x.dart) now', 6), ('lib/x.dart', null));
+      expect(pathAt('nothing here', 3), isNull);
+      expect(pathAt('x', 9), isNull);
+      expect(
+        terminalOutput('zsh', 'a\n```b\n\n'),
+        'Output of the terminal "zsh":\n```\na\n\'\'\'b\n```',
+      );
+      const c = AxColors.dark;
+      expect(terminalColor(null, c), isNull);
+      expect(terminalColor('#102030', c), const Color(0xFF102030));
+      expect(terminalColor('16', c), const Color(0xFF000000));
+      expect(terminalColor('231', c), const Color(0xFFFFFFFF));
+      expect(terminalColor('232', c), const Color(0xFF080808));
+      expect(terminalColor('1', c), isNot(terminalColor('1', AxColors.light)));
+      for (final no in ['256', '-1', 'x', '#12']) {
+        expect(terminalColor(no, c), isNull, reason: no);
+      }
+    });
+
+    testWidgets('one is opened in the panel, typed into, and a path in it opens the file', (
+      t,
+    ) async {
+      final s = Asked()
+        ..texts = {'lib/cache.dart': cache}
+        ..folders = const [
+          FolderInfo('f_1', '/w', commands: [FolderCommand('Dev', 'npm run dev', key: 1)]),
+        ];
+      await shell(t, s);
+      await t.tap(find.bySemanticsLabel(RegExp('^(Show|Hide) the panel')).first);
+      await settled(t);
+      // Not made there yet (decision 0022): nothing offers one.
+      if (!Terminals.made) {
+        expect(find.bySemanticsLabel('New terminal'), findsNothing);
+        return;
+      }
+      await press(t, find.bySemanticsLabel('New terminal'));
+      expect(s.calls.last, ['terminal', 's']);
+      expect(find.byType(TerminalView), findsOneWidget);
+      s.show(
+        const Screen(
+          't_1',
+          version: 1,
+          rows: [
+            [Span('w\$ ls')],
+            [Span('lib/cache.dart:300', fg: '1'), Span(' ok')],
+          ],
+          cursor: (0, 4),
+        ),
+      );
+      await settled(t);
+      expect(find.textContaining('lib/cache.dart:300', findRichText: true), findsOneWidget);
+      await snap(t, 'terminal');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyL);
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await settled(t);
+      expect(
+        [
+          for (final c in s.calls)
+            if (c.first == 'type') c[1],
+        ],
+        ['l', '\r', '\x03', '\x1b[A'],
+      );
+      // A program that asks for it has its arrows as an application has them.
+      s.show(Screen('t_1', version: 2, rows: s.shown!.rows, appCursor: true));
+      await settled(t);
+      await t.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await settled(t);
+      expect(s.calls.last, ['type', '\x1bOA']);
+      // Lines pasted where the program does not mark them are asked about first.
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async => call.method == 'Clipboard.getData' ? {'text': 'make\nmake install'} : null,
+      );
+      addTearDown(
+        () => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final typed = s.calls.length;
+      await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settled(t);
+      expect(find.text('Paste 2 lines? Each runs as it arrives.'), findsOneWidget);
+      expect(s.calls.length, typed, reason: 'nothing typed yet');
+      await press(t, find.text('Paste'));
+      expect(s.calls.last, ['type', 'make\rmake install']);
+      // A path in it is pressed: the file opens at its line.
+      final row = find.textContaining('lib/cache.dart:300', findRichText: true);
+      await t.tapAt(t.getTopLeft(row) + const Offset(20, 6));
+      await settled(t);
+      await t.pump();
+      expect(find.byType(FileReader), findsOneWidget);
+      expect(find.textContaining('line 300 forget()', findRichText: true), findsOneWidget);
+      await press(t, find.bySemanticsLabel('Close lib/cache.dart'));
+      // A folder's command runs in a new terminal, by its key too.
+      s.terms = const [TerminalInfo('t_1', 's', 'zsh')];
+      await t.pump(const Duration(seconds: 3));
+      await press(t, find.text('Dev'));
+      expect(s.calls.last, ['terminal', 's', 'npm run dev']);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.digit1);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settled(t);
+      expect(
+        [
+          for (final c in s.calls)
+            if (c.first == 'terminal') c.length,
+        ],
+        [2, 3, 3],
+      );
+      // Busy, it is closed only with a second word.
+      s.closing = const Failed(1, 'busy', 'npm still runs in it');
+      await press(t, find.bySemanticsLabel('Close the terminal'));
+      expect(find.text('Something still runs in it.'), findsOneWidget);
+      await press(t, find.text('End it'));
+      expect(s.calls.last, ['close', 't_1', true]);
+      expect(find.byType(TerminalView), findsNothing);
+    });
+
+    testWidgets('commands are set from the folder\'s menu', (t) async {
+      final s = Asked();
+      await shell(t, s);
+      await press(t, find.bySemanticsLabel('Settings of w'));
+      await press(t, find.text('Commands…'));
+      await t.enterText(field('Name of the command'), 'Test');
+      await t.enterText(field('What is typed'), 'cargo test');
+      await press(t, find.text('Add'));
+      expect(s.calls.last.last, '1: Test = cargo test');
+      expect(find.textContaining('cargo test'), findsWidgets);
     });
   });
 }
